@@ -2,7 +2,7 @@
 
 Extract **high‑precision** subjective drug effects from narrative experience reports (Erowid, etc.) using Mistral AI, map them to a controlled ontology, attribute them to specific doses, and store the results in MongoDB – ready for knowledge graph construction.
 
-> **Precision first.** This pipeline is built for recall‑constrained information extraction. It prefers to omit a tag rather than guess, and it validates every output against a strict controlled vocabulary and dose table.
+> This pipeline is built for recall‑constrained information extraction. It prefers to omit a tag rather than guess, and it validates every output against a strict controlled vocabulary and dose table.
 
 ---
 
