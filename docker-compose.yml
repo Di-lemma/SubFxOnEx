@@ -1,0 +1,22 @@
+services:
+  effect-extractor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: effect-extractor
+    working_dir: /app
+    command: ["sleep", "infinity"]
+    environment:
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      MISTRAL_MODEL: ${MISTRAL_MODEL:-mistral-large-2512}
+      MONGO_URI: ${MONGO_URI:-mongodb://host.docker.internal:27017}
+      MONGO_DB: ${MONGO_DB:-tripindex}
+      MONGO_SOURCE_COLLECTION: ${MONGO_SOURCE_COLLECTION:-erowid}
+      MONGO_TARGET_COLLECTION: ${MONGO_TARGET_COLLECTION:-erowid_effects}
+      BATCH_SIZE: ${BATCH_SIZE:-10}
+      DRY_RUN: ${DRY_RUN:-false}
+    volumes:
+      - .:/app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
