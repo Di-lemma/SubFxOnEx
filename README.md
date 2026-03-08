@@ -39,6 +39,31 @@ Extract **high‑precision** subjective drug effects from narrative experience r
 
 The ontology converges instead of exploding, as additional reports are tagged.
 
+### Phase 1: Ontology Bootstrapping
+
+Almost every report introduces something new.
+
+This is expected because the model is still encountering new categories like:
+
+- social confidence
+- emotional warmth
+- visual distortions
+- patterning
+- dissociation
+- nausea
+
+etc.
+
+### Phase 2: Saturation
+
+```
+report 201–300 → 27 new effects
+```
+
+which is a **3–4× drop**.
+
+Now reports mostly reuse existing labels instead of inventing new ones.
+
 ---
 
 ## Requirements
