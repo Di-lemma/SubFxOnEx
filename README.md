@@ -8,7 +8,7 @@ Extract **high‑precision** subjective drug effects from narrative experience r
 
 ## Features
 
-- **Controlled effect ontology** – 220+ canonical effect tags across 15 domains (visual, cognitive, somatic, emotional, etc.)
+- **\*Controlled\* effect ontology that converges** – 220+ canonical effect tags across 15 domains (visual, cognitive, somatic, emotional, etc.)
 - **Dose attribution** – Links each effect to the specific dose(s) from the report’s `dose_table` (single substance, combination, or unknown)
 - **Alias resolution** – Maps free‑text descriptions to canonical tags using a comprehensive alias dictionary (e.g., *“walls breathing”* → `surface breathing`)
 - **Intelligent chunking** – Splits long reports into overlapping chunks while preserving context, then merges and deduplicates results
