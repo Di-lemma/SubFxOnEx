@@ -1,4 +1,4 @@
-# Subjective Effect Extractor for Trip Reports
+# Subjective Effect Ontology Extractor for Trip Reports
 
 Extract **high‑precision** subjective drug effects from narrative experience reports (Erowid, etc.) using Mistral AI, map them to a controlled ontology, attribute them to specific doses, and store the results in MongoDB – ready for knowledge graph construction.
 
@@ -8,7 +8,7 @@ Extract **high‑precision** subjective drug effects from narrative experience r
 
 ## Features
 
-- **Controlled effect ontology** – 150+ canonical effect tags across 15 domains (visual, cognitive, somatic, emotional, etc.)
+- **Controlled effect ontology** – 220+ canonical effect tags across 15 domains (visual, cognitive, somatic, emotional, etc.)
 - **Dose attribution** – Links each effect to the specific dose(s) from the report’s `dose_table` (single substance, combination, or unknown)
 - **Alias resolution** – Maps free‑text descriptions to canonical tags using a comprehensive alias dictionary (e.g., *“walls breathing”* → `surface breathing`)
 - **Intelligent chunking** – Splits long reports into overlapping chunks while preserving context, then merges and deduplicates results
@@ -26,6 +26,18 @@ Extract **high‑precision** subjective drug effects from narrative experience r
 4. **Validate & canonicalize** the model’s output – reject out‑of‑vocabulary effects, fix dose references, and apply alias mapping.
 5. **Handle long reports** – if the report exceeds a threshold, it’s split into overlapping chunks, each processed separately, then merged.
 6. **Persist** the final `ExtractionResult` (tags + notes) into the target MongoDB collection (e.g., `erowid_effects`), or print it in dry‑run mode.
+
+---
+
+## Ontology Features
+
+| report range | new effects |
+| ------------ | ----------- |
+| 1–100        | **99**      |
+| 101–200      | **100**     |
+| 201–300      | **27**      |
+
+The ontology converges instead of exploding, as additional reports are tagged.
 
 ---
 
