@@ -4,6 +4,10 @@ Extract **high‑precision** subjective drug effects from narrative experience r
 
 > This pipeline is built for recall‑constrained information extraction. It prefers to omit a tag rather than guess, and it validates every output against a strict controlled vocabulary and dose table.
 
+## A good tag should answer:
+
+> # What exact wording in the report would justify this tag?
+
 ---
 
 ## Features
