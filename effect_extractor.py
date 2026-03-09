@@ -1,8 +1,11 @@
 import json
 import os
+import re
 import sys
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from json import JSONDecodeError
 from typing import List, Literal, Optional
 
@@ -78,6 +81,15 @@ class ExtractionResult(BaseModel):
         default=None,
         description="Any limitations, ambiguity, or missing dose information",
     )
+
+
+@dataclass
+class TextChunk:
+    text: str
+    start: int
+    end: int
+    index: int
+    count: int
 
 CONTROLLED_EFFECT_ONTOLOGY = {
     "visual": {
@@ -852,7 +864,7 @@ def build_controlled_vocabulary_text() -> str:
 
 
 SYSTEM_PROMPT = f"""
-You are a strict information extraction system.
+You are a strict information extraction system. You will be extracting subjective effects from a trip report on either a single substance, or a substance combination.
 
 Task:
 Extract ONLY subjective effects that are explicitly supported by the report text and attributable to the listed dose_table entries.
@@ -877,9 +889,13 @@ Interpret attribution_type strictly as follows:
   Use only when the effect is attributed to multiple different substances together, or when the report explicitly describes an interactional combined state involving multiple substances.
   Do NOT use combination merely because multiple dose events of the same substance are referenced.
 - unknown:
-  Use only when the report clearly describes an effect but the attribution to listed dose_table entries cannot be resolved from the text.
+  Use only when the report clearly describes an effect and the effect is still plausibly tied to the listed dose_table entries, but attribution to specific listed entry/entries cannot be resolved from the text.
+  Do NOT use unknown for effects attributed to non-listed substances, withdrawal states, aftermath states, or unsupported speculation.
 
 Dose reference rules:
+- Prefer the narrowest supported attribution.
+- If the text supports only one listed dose event for an effect, include only that dose_ref.
+- Use multiple same-substance dose_refs only when the text clearly indicates cumulative, repeated, carryover, or post-redose attribution across those dose events.
 - Include all and only the dose_table entries actually supported by the text for that effect.
 - If the effect is tied to one specific listed dose event, include only that dose_ref.
 - If the effect is tied to cumulative or repeated exposure to the same substance across multiple listed dose events, include those same-substance dose_refs and still use attribution_type="single_substance".
@@ -901,8 +917,10 @@ Ontology constraints:
 - Do not invent tags.
 - Use broad fallback tags only when a more specific canonical tag is not directly supported.
 
-Output standard:
-Return only tags that are defensible as high-precision graph edges.
+Examples:
+- If d1 and d2 are both MDMA and the effect is described after a redose or as cumulative across both doses, use attribution_type="single_substance" and include [d1, d2].
+- If d1 is MDMA and d2 is cannabis and the effect is described as arising from taking them together, use attribution_type="combination" and include [d1, d2].
+- If only d2 is clearly linked to the effect, include only [d2], not [d1, d2].
 
 Controlled vocabulary:
 {build_controlled_vocabulary_text()}
@@ -1069,9 +1087,9 @@ def split_text_into_chunks(
     text: str,
     chunk_size: int,
     overlap: int,
-) -> List[str]:
+) -> List[TextChunk]:
     if not text:
-        return [""]
+        return [TextChunk(text="", start=0, end=0, index=1, count=1)]
 
     if chunk_size <= 0:
         raise ValueError("chunk_size must be greater than 0")
@@ -1081,10 +1099,10 @@ def split_text_into_chunks(
         raise ValueError("overlap must be smaller than chunk_size")
 
     if len(text) <= chunk_size:
-        return [text]
+        return [TextChunk(text=text, start=0, end=len(text), index=1, count=1)]
 
     separators = ("\n\n", "\n", ". ")
-    chunks: List[str] = []
+    raw_chunks = []
     start = 0
     text_length = len(text)
 
@@ -1102,35 +1120,153 @@ def split_text_into_chunks(
         if end <= start:
             end = target_end
 
-        chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
+        chunk_text = text[start:end].strip()
+        if chunk_text:
+            raw_chunks.append((chunk_text, start, end))
 
         if end >= text_length:
             break
 
         start = max(end - overlap, start + 1)
 
-    return chunks
+    count = len(raw_chunks)
+    return [
+        TextChunk(text=chunk_text, start=start, end=end, index=i, count=count)
+        for i, (chunk_text, start, end) in enumerate(raw_chunks, start=1)
+    ]
 
 
-def build_tag_dedup_key(tag: SubjectiveEffectTag) -> str:
-    dose_ids = sorted(
-        dose_ref.dose_id.strip()
-        for dose_ref in tag.attribution.dose_refs
-        if isinstance(dose_ref.dose_id, str) and dose_ref.dose_id.strip()
+def normalize_evidence_text(value: str) -> str:
+    value = value.lower().strip()
+    value = re.sub(r"\s+", " ", value)
+    value = re.sub(r"[\"'`]+", "", value)
+    value = re.sub(r"[^a-z0-9\s]", "", value)
+    return value.strip()
+
+
+def evidence_texts_equivalent(a: str, b: str) -> bool:
+    na = normalize_evidence_text(a)
+    nb = normalize_evidence_text(b)
+
+    if not na or not nb:
+        return False
+    if na == nb:
+        return True
+
+    shorter, longer = (na, nb) if len(na) <= len(nb) else (nb, na)
+
+    if len(shorter) >= 30 and shorter in longer:
+        return True
+
+    return SequenceMatcher(None, na, nb).ratio() >= 0.90
+
+
+def build_effect_group_key(
+    tag: SubjectiveEffectTag,
+) -> tuple[str, str, str, Optional[str]]:
+    return (
+        tag.domain,
+        tag.effect,
+        tag.parent_effect,
+        tag.detail.strip().lower()
+        if isinstance(tag.detail, str) and tag.detail.strip()
+        else None,
     )
-    return json.dumps(
-        {
-            "domain": tag.domain,
-            "effect": tag.effect,
-            "parent_effect": tag.parent_effect,
-            "attribution_type": tag.attribution.attribution_type,
-            "dose_ids": dose_ids,
-        },
-        sort_keys=True,
-        ensure_ascii=False,
+
+
+def dose_id_set(tag: SubjectiveEffectTag) -> set[str]:
+    return {
+        ref.dose_id.strip()
+        for ref in tag.attribution.dose_refs
+        if isinstance(ref.dose_id, str) and ref.dose_id.strip()
+    }
+
+
+def is_same_substance_dose_set(tag: SubjectiveEffectTag) -> bool:
+    substances = {
+        ref.substance.strip().lower()
+        for ref in tag.attribution.dose_refs
+        if isinstance(ref.substance, str) and ref.substance.strip()
+    }
+    return len(substances) == 1
+
+
+def attribution_text(tag: SubjectiveEffectTag) -> str:
+    note = tag.attribution.attribution_note or ""
+    return f"{tag.text_detail} {note}".lower()
+
+
+def has_explicit_combination_support(tag: SubjectiveEffectTag) -> bool:
+    if tag.attribution.attribution_type != "combination":
+        return False
+
+    text = attribution_text(tag)
+    substances = [
+        ref.substance.strip().lower()
+        for ref in tag.attribution.dose_refs
+        if isinstance(ref.substance, str) and ref.substance.strip()
+    ]
+
+    named_substances = sum(1 for s in set(substances) if s in text)
+    combo_cues = (
+        "together",
+        "combined",
+        "combination",
+        "mix",
+        "mixed",
+        "with ",
+        "after adding",
+        "adding more",
+        "both",
     )
+
+    return named_substances >= 2 or any(cue in text for cue in combo_cues)
+
+
+def attribution_rank(tag: SubjectiveEffectTag) -> int:
+    tag_type = tag.attribution.attribution_type
+    refs = dose_id_set(tag)
+
+    if tag_type == "unknown":
+        return 0
+
+    if tag_type == "combination":
+        if has_explicit_combination_support(tag):
+            return 4
+        return 1
+
+    if len(refs) == 1:
+        return 3
+    if is_same_substance_dose_set(tag):
+        return 2
+    return 1
+
+
+def interpretive_note_penalty(tag: SubjectiveEffectTag) -> int:
+    note = (tag.attribution.attribution_note or "").lower()
+    penalties = (
+        "suggesting",
+        "consistent with",
+        "indicating",
+        "which is consistent with",
+        "implying",
+    )
+    return 5 if any(p in note for p in penalties) else 0
+
+
+def tag_score(tag: SubjectiveEffectTag) -> float:
+    score = 0.0
+    score += tag.confidence * 100.0
+    score += attribution_rank(tag) * 10.0
+    score += min(len(normalize_evidence_text(tag.text_detail)), 160) / 40.0
+    score -= interpretive_note_penalty(tag)
+    return score
+
+
+def choose_best_candidate(
+    candidates: List[SubjectiveEffectTag],
+) -> SubjectiveEffectTag:
+    return max(candidates, key=tag_score)
 
 
 def append_note(existing_note: Optional[str], extra_note: str) -> str:
@@ -1312,21 +1448,56 @@ def sanitize_extraction_payload(raw_result: dict, dose_table: List[dict]) -> dic
     }
 
 
+def mergeable_note_paragraphs(note: str) -> List[str]:
+    kept = []
+    for paragraph in [p.strip() for p in note.split("\n\n") if p.strip()]:
+        if paragraph.startswith("Rejected "):
+            kept.append(paragraph)
+        elif "Malformed dose references were discarded during validation." in paragraph:
+            kept.append(paragraph)
+    return kept
+
+
 def merge_extraction_results(results: List[ExtractionResult]) -> ExtractionResult:
-    deduped_tags = {}
-    notes = []
+    grouped: dict[
+        tuple[str, str, str, Optional[str]],
+        List[SubjectiveEffectTag],
+    ] = {}
+    merged_notes: List[str] = []
 
     for result in results:
         for tag in result.tags:
-            deduped_tags.setdefault(build_tag_dedup_key(tag), tag)
+            group_key = build_effect_group_key(tag)
+            grouped.setdefault(group_key, []).append(tag)
         if result.notes:
-            note = result.notes.strip()
-            if note and note not in notes:
-                notes.append(note)
+            for paragraph in mergeable_note_paragraphs(result.notes):
+                if paragraph not in merged_notes:
+                    merged_notes.append(paragraph)
+
+    final_tags: List[SubjectiveEffectTag] = []
+
+    for group_tags in grouped.values():
+        evidence_clusters: List[List[SubjectiveEffectTag]] = []
+
+        for tag in group_tags:
+            placed = False
+            for cluster in evidence_clusters:
+                if any(
+                    evidence_texts_equivalent(tag.text_detail, existing.text_detail)
+                    for existing in cluster
+                ):
+                    cluster.append(tag)
+                    placed = True
+                    break
+            if not placed:
+                evidence_clusters.append([tag])
+
+        for cluster in evidence_clusters:
+            final_tags.append(choose_best_candidate(cluster))
 
     return ExtractionResult(
-        tags=list(deduped_tags.values()),
-        notes="\n\n".join(notes) if notes else None,
+        tags=final_tags,
+        notes="\n\n".join(merged_notes) if merged_notes else None,
     )
 
 
@@ -1402,13 +1573,15 @@ def extract_effects(client: Mistral, model: str, doc: dict) -> ExtractionResult:
     chunks = split_text_into_chunks(report_text, chunk_size=chunk_size, overlap=chunk_overlap)
     chunk_results = []
 
-    for chunk_index, chunk in enumerate(chunks, start=1):
+    for chunk in chunks:
         chunk_payload = dict(payload)
-        chunk_payload["report_text"] = chunk
+        chunk_payload["report_text"] = chunk.text
         chunk_payload["report_chunk"] = {
-            "index": chunk_index,
-            "count": len(chunks),
+            "index": chunk.index,
+            "count": chunk.count,
             "strategy": "char_window_with_overlap",
+            "start_char": chunk.start,
+            "end_char": chunk.end,
         }
         chunk_results.append(extract_effects_for_payload(client, model, chunk_payload))
 
