@@ -117,6 +117,9 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "depth distortion": "visual distortions",
         "foreshortening distortion": "visual distortions",
         "perspective distortion": "visual distortions",
+        "scene replacement": "visual distortions",
+        "environmental transfiguration": "visual distortions",
+        "symbolic imagery": "visual distortions",
         "zooming": "visual distortions",
         "visual fragmentation": "visual distortions",
         "double vision": "visual distortions",
@@ -146,6 +149,8 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "ringing": "auditory distortions",
         "humming": "auditory distortions",
         "buzzing": "auditory distortions",
+        "externalized sounds": "auditory distortions",
+        "sound localization distortion": "auditory distortions",
     },
 
     "somatic": {
@@ -244,6 +249,10 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "wonder": "emotional change",
         "surprise": "emotional change",
         "giddiness": "emotional change",
+        "manic mood": "emotional change",
+        "emotional catharsis": "emotional change",
+        "helplessness": "emotional change",
+        "suspiciousness": "emotional change",
     },
 
     "cognitive": {
@@ -270,6 +279,14 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "reduced inhibition": "cognitive change",
         "increased focus": "cognitive change",
         "decreased focus": "cognitive change",
+        "thought disorganization": "cognitive change",
+        "mind blanking": "cognitive change",
+        "delusional thinking": "cognitive change",
+        "ideas of reference": "cognitive change",
+        "grandiosity": "cognitive change",
+        "hypervigilance": "cognitive change",
+        "compulsive meaning-making": "cognitive change",
+        "decision paralysis": "cognitive change",
     },
 
     "temporal": {
@@ -293,6 +310,11 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "observer perspective": "selfhood change",
         "disembodiment": "selfhood change",
         "unity experience": "selfhood change",
+        "perceived theriomorphosis": "selfhood change",
+        "agency disturbance": "selfhood change",
+        "identity fluidity": "selfhood change",
+        "self-multiplication": "selfhood change",
+        "perceived inanimate transformation": "selfhood change",
     },
 
     "spiritual": {
@@ -830,60 +852,57 @@ def build_controlled_vocabulary_text() -> str:
 
 
 SYSTEM_PROMPT = f"""
-You are an expert biomedical and psychopharmacology information extraction engine.
+You are a strict information extraction system.
 
 Task:
-Extract ONLY subjective effects that are directly supported by the report text and attributable to the dose or dose combination listed in the dose_table.
+Extract ONLY subjective effects that are explicitly supported by the report text and attributable to the listed dose_table entries.
 
-Primary objective:
-Produce HIGH-PRECISION extractions suitable for later use in a knowledge graph.
-When uncertain, OMIT the tag rather than guessing.
+Non-negotiable constraints:
+- Use ONLY the report text as evidence.
+- Do NOT use background knowledge about pharmacology, drug classes, common effects, or likely implications.
+- When uncertain, omit the tag.
+- Prefer omission over inference.
 
-Critical rules:
-1. Extract an effect ONLY when the report text explicitly states it, clearly describes it phenomenologically, or supports it with very strong local evidence.
-2. Do NOT extract effects based on weak inference, speculation, interpretation, background knowledge, or likely-but-unstated implications.
-3. If a tag would require guessing beyond the text, omit it.
-4. Prefer UNDER-extraction to over-extraction.
+Attribution constraints:
+- If dose_table is non-empty, extract ONLY effects attributable to one or more listed dose_table entries.
+- If an effect is attributed in the text to a non-listed substance, omit it unless the same effect is also separately and explicitly attributed to a listed dose_table entry.
+- Do NOT fabricate placeholder dose_ids or synthetic exposures.
+- Do NOT include withdrawal, comedown, rebound, or aftermath effects unless they are explicitly described as direct effects of the listed dose(s).
 
-Dose attribution rules:
-5. Extract effects ONLY if they pertain to the dose or dose combination listed in the dose_table.
-6. Use dose_table entries as the source of truth for exposure attribution. When possible, reference the relevant entries by their dose_id in attribution.dose_refs.
-7. If an effect pertains to one dose entry, set attribution_type to single_substance and include only that entry.
-8. If an effect clearly arises from an interaction, combined state, or sequential combination of multiple listed dose entries, set attribution_type to combination and include all relevant entries.
-9. Do NOT assign combination attribution merely because multiple substances or doses appear in the report overall. Use combination only when the text supports a combined or interactional attribution.
-10. If the dose_table is empty or insufficient, still extract effects from the report, but set attribution_type to unknown, use an empty dose_refs list when needed, and explain ambiguity in attribution_note or notes.
-11. If a non-listed substance is mentioned as contributing to an effect, do NOT attribute the effect to that non-listed substance. Either omit the effect or extract it only if the listed dose_table entries still clearly support attribution.
+Interpret attribution_type strictly as follows:
+- single_substance:
+  Use when all referenced dose_refs belong to the same substance, even if multiple listed dose events are involved.
+  This includes redosing, cumulative exposure, or repeated administrations of the same substance.
+- combination:
+  Use only when the effect is attributed to multiple different substances together, or when the report explicitly describes an interactional combined state involving multiple substances.
+  Do NOT use combination merely because multiple dose events of the same substance are referenced.
+- unknown:
+  Use only when the report clearly describes an effect but the attribution to listed dose_table entries cannot be resolved from the text.
 
-Effect selection rules:
-12. Extract subjective effects only. Do NOT extract logistics, social facts, advice, moral commentary, scene description, or metadata.
-13. Do NOT diagnose the author.
-14. Do NOT convert consequences, aftermath details, bodily damage, or practical problems into subjective effects unless the text directly describes them as experienced effects.
-15. Do NOT convert generic enthusiasm or stylistic language into extra effect tags unless a specific effect is actually described.
-16. Do NOT infer a more specific effect from a broader description unless the specific effect is clearly supported by the wording.
-17. Do NOT infer bodily sensations from unrelated phrases. For example, dizziness does not imply tingling; nose irritation does not imply numbness; meaningful conversation does not imply analysis enhancement.
-18. Do NOT extract the same local phenomenon multiple ways unless the text clearly supports multiple distinct effects.
+Dose reference rules:
+- Include all and only the dose_table entries actually supported by the text for that effect.
+- If the effect is tied to one specific listed dose event, include only that dose_ref.
+- If the effect is tied to cumulative or repeated exposure to the same substance across multiple listed dose events, include those same-substance dose_refs and still use attribution_type="single_substance".
+- If the effect is tied to multiple different listed substances, include those dose_refs and use attribution_type="combination".
+- Do not include extra dose_refs just because they appear elsewhere in the report.
 
-Ontology mapping rules:
-19. Map each extracted effect to the most specific matching canonical effect tag from the controlled vocabulary below.
-20. Use broad fallback tags such as visual distortions, body load, emotional change, cognitive change, selfhood change, gastrointestinal effects, auditory distortions, or sleep disturbance ONLY when no more specific canonical tag is directly supported by the text.
-21. Do NOT invent new canonical effect tags outside the controlled vocabulary.
-22. If the text contains finer phenomenology than the canonical tag captures, preserve it in detail rather than inventing a new effect tag.
+Evidence constraints:
+- Every extracted tag must be supported by a short, local quote or minimally trimmed excerpt from the text.
+- text_detail must stay close to the exact wording and must not introduce interpretation.
+- If no short supporting excerpt exists, omit the tag.
 
-De-duplication and overlap rules:
-23. Prefer the SMALLEST set of non-overlapping tags that faithfully captures the report.
-24. Do NOT emit multiple near-synonymous, parent/child, or highly overlapping tags for the same evidence snippet unless each is independently supported.
-25. If one specific tag fully captures the evidence, do not also emit a broader sibling or nearby interpretation from the same snippet.
-26. For a single passage, prefer one well-supported canonical tag over several speculative neighboring tags.
+De-duplication constraints:
+- Do not output duplicates.
+- Do not output multiple overlapping tags for the same evidence passage unless the passage independently supports multiple distinct experiences.
+- When several tags could fit one passage, choose exactly one: the most specific directly supported tag. If none is directly supported, omit.
 
-Evidence rules:
-27. Keep text_detail brief, grounded, and as close as possible to the exact supporting wording.
-28. text_detail must point to the actual passage supporting the tag, not a paraphrase that introduces new interpretation.
-29. If support is weak, omit the tag instead of compensating with an attribution_note.
+Ontology constraints:
+- Map only to canonical tags from the controlled vocabulary.
+- Do not invent tags.
+- Use broad fallback tags only when a more specific canonical tag is not directly supported.
 
-Output quality rules:
-30. Favor precision, specificity, and evidence quality over recall.
-31. Return only tags that would be defensible as graph edges later.
-32. Avoid duplicates.
+Output standard:
+Return only tags that are defensible as high-precision graph edges.
 
 Controlled vocabulary:
 {build_controlled_vocabulary_text()}
