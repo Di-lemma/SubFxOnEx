@@ -55,7 +55,7 @@ class SubjectiveEffectTag(BaseModel):
     )
     subjective_effect: Optional[str] = Field(
         default=None,
-        description="Deprecated alias of effect retained for backward compatibility with older downstream consumers"
+        description="Deprecated alias of effect retained for backward compatibility with older downstream consumers",
     )
     parent_effect: str = Field(
         description="Broader fallback effect family for rollups, e.g. visual distortions, body load, emotional change"
@@ -90,6 +90,7 @@ class TextChunk:
     end: int
     index: int
     count: int
+
 
 CONTROLLED_EFFECT_ONTOLOGY = {
     "visual": {
@@ -140,7 +141,6 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "field widening": "visual distortions",
         "synesthetic visuals": "visual distortions",
     },
-
     "auditory": {
         "auditory distortions": "auditory distortions",
         "auditory enhancement": "auditory distortions",
@@ -164,7 +164,6 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "externalized sounds": "auditory distortions",
         "sound localization distortion": "auditory distortions",
     },
-
     "somatic": {
         "body load": "body load",
         "somatic heaviness": "body load",
@@ -202,7 +201,6 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "pain amplification": "body load",
         "itching": "body load",
     },
-
     "motor": {
         "motor change": "motor change",
         "incoordination": "motor change",
@@ -217,7 +215,6 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "jerking": "motor change",
         "shaking": "motor change",
     },
-
     "gastrointestinal": {
         "gastrointestinal effects": "gastrointestinal effects",
         "nausea": "gastrointestinal effects",
@@ -231,7 +228,6 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "salivation": "gastrointestinal effects",
         "difficulty swallowing": "gastrointestinal effects",
     },
-
     "emotional": {
         "emotional change": "emotional change",
         "euphoria": "emotional change",
@@ -266,7 +262,6 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "helplessness": "emotional change",
         "suspiciousness": "emotional change",
     },
-
     "cognitive": {
         "cognitive change": "cognitive change",
         "confusion": "cognitive change",
@@ -299,8 +294,13 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "hypervigilance": "cognitive change",
         "compulsive meaning-making": "cognitive change",
         "decision paralysis": "cognitive change",
+        "internal cognitive split": "cognitive change",
+        # Reported experience of the mind as divided into conflicting parts, streams, or modes of thought.
+        # -> “part of me knew it was nonsense, but I still believed it"
+        "meta-awareness of irrationality": "cognitive change",
+        # Reported awareness that one’s thoughts, beliefs, fears, or interpretations are irrational, exaggerated, or unfounded while still experiencing them.
+        # -> “it felt like two parts of my mind were fighting"
     },
-
     "temporal": {
         "time distortion": "time distortion",
         "time dilation": "time distortion",
@@ -309,7 +309,6 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "time fragmentation": "time distortion",
         "looping sense of time": "time distortion",
     },
-
     "selfhood": {
         "selfhood change": "selfhood change",
         "dissociation": "selfhood change",
@@ -328,18 +327,23 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "self-multiplication": "selfhood change",
         "perceived inanimate transformation": "selfhood change",
     },
-
     "spiritual": {
         "spiritual experience": "spiritual experience",
         "mystical quality": "spiritual experience",
+        # Reported sense that the experience possesses an ineffable, profound, or otherworldly character that feels beyond ordinary explanation or language.
         "sacredness": "spiritual experience",
+        # Reported feeling that people, objects, places, or the experience itself possess a holy, reverent, or spiritually significant quality.
         "revelatory insight": "spiritual experience",
+        # Reported experience of receiving sudden or powerful insight that feels like a revealed truth, message, or realization about reality, life, or oneself.
         "existential insight": "spiritual experience",
+        # Reported realization or reflection concerning fundamental aspects of existence, such as meaning, identity, mortality, purpose, or the nature of being.
         "cosmic significance": "spiritual experience",
+        # Reported sense that events, thoughts, or perceptions carry immense universal importance or are connected to a larger cosmic order or purpose.
         "oneness": "spiritual experience",
+        # Reported experience of unity or dissolution of boundaries between self and other entities, the environment, or the universe.
         "contact-with-presence": "spiritual experience",
+        # Reported sensation of encountering, communicating with, or being accompanied by an unseen entity, intelligence, or presence.
     },
-
     "social": {
         "social change": "social change",
         "sociability enhancement": "social change",
@@ -353,7 +357,6 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "feeling connected": "social change",
         "feeling alienated": "social change",
     },
-
     "tactile": {
         "tactile change": "tactile change",
         "enhanced touch": "tactile change",
@@ -362,7 +365,6 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "pleasant touch amplification": "tactile change",
         "unpleasant touch amplification": "tactile change",
     },
-
     "sexual": {
         "sexual change": "sexual change",
         "increased libido": "sexual change",
@@ -371,14 +373,12 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "tactile sensual enhancement": "sexual change",
         "sexual dysfunction": "sexual change",
     },
-
     "thermal": {
         "temperature change": "temperature change",
         "feeling hot": "temperature change",
         "feeling cold": "temperature change",
         "temperature fluctuation": "temperature change",
     },
-
     "sleep": {
         "sleep disturbance": "sleep disturbance",
         "insomnia": "sleep disturbance",
@@ -402,7 +402,6 @@ EFFECT_ALIASES = EFFECT_ALIASES = {
     "visual vibration": "visual vibration",
     "visual anomalies": "visual distortions",
     "visual effects": "visual distortions",
-
     # visual: pattern / movement / surfaces
     "patterns": "patterning",
     "patterns everywhere": "patterning",
@@ -430,7 +429,6 @@ EFFECT_ALIASES = EFFECT_ALIASES = {
     "morphing visuals": "morphing",
     "drifty visuals": "drifting",
     "shimmering visuals": "shimmering",
-
     # visual: geometry / imagery
     "closed eye visuals": "closed-eye visuals",
     "closed-eye visuals": "closed-eye visuals",
@@ -458,7 +456,6 @@ EFFECT_ALIASES = EFFECT_ALIASES = {
     "shadow figures": "shadow imagery",
     "peripheral figures": "peripheral imagery",
     "things in the corner of my eye": "peripheral imagery",
-
     # visual: trails / afterimages / motion
     "tracers": "visual trails",
     "trails": "visual trails",
@@ -467,7 +464,6 @@ EFFECT_ALIASES = EFFECT_ALIASES = {
     "after images": "afterimages",
     "after-images": "afterimages",
     "motion exaggeration": "motion exaggeration",
-
     # visual: color / brightness / clarity
     "brighter colors": "enhanced colors",
     "enhanced colour": "enhanced colors",
@@ -491,7 +487,6 @@ EFFECT_ALIASES = EFFECT_ALIASES = {
     "enhanced clarity": "visual clarity",
     "crystal clear vision": "visual clarity",
     "visual static": "visual snow",
-
     # visual: perception / space
     "distance distortions": "distance distortion",
     "distance distortion": "distance distortion",
@@ -513,7 +508,6 @@ EFFECT_ALIASES = EFFECT_ALIASES = {
     "pareidolia": "pareidolia",
     "seeing faces in things": "pareidolia",
     "seeing patterns in things": "pattern recognition enhancement",
-
     # auditory
     "auditory distortion": "auditory distortions",
     "sound distortion": "auditory distortions",
@@ -550,7 +544,6 @@ EFFECT_ALIASES = EFFECT_ALIASES = {
     "tinnitus": "ringing",
     "humming sound": "humming",
     "buzzing sound": "buzzing",
-
     # somatic
     "body heaviness": "somatic heaviness",
     "heavy body": "somatic heaviness",
@@ -613,7 +606,6 @@ EFFECT_ALIASES = EFFECT_ALIASES = {
     "analgesia": "pain relief",
     "increased pain": "pain amplification",
     "itchiness": "itching",
-
     # motor
     "loss of coordination": "incoordination",
     "poor coordination": "incoordination",
@@ -634,7 +626,6 @@ EFFECT_ALIASES = EFFECT_ALIASES = {
     "jerks": "jerking",
     "jerking": "jerking",
     "shaking": "shaking",
-
     # gastrointestinal
     "gi effects": "gastrointestinal effects",
     "gastrointestinal effect": "gastrointestinal effects",
@@ -659,7 +650,6 @@ EFFECT_ALIASES = EFFECT_ALIASES = {
     "excess salivation": "salivation",
     "drooling": "salivation",
     "trouble swallowing": "difficulty swallowing",
-
     # emotional: positive / neutral / negative
     "happy": "euphoria",
     "euphoric": "euphoria",
@@ -700,7 +690,6 @@ EFFECT_ALIASES = EFFECT_ALIASES = {
     "awe": "awe",
     "wonder": "wonder",
     "giddy": "giddiness",
-
     # cognitive
     "mental confusion": "confusion",
     "clear mind": "mental clarity",
@@ -738,7 +727,6 @@ EFFECT_ALIASES = EFFECT_ALIASES = {
     "more focused": "increased focus",
     "unfocused": "decreased focus",
     "can't focus": "decreased focus",
-
     # temporal
     "time distortion": "time distortion",
     "time slowed": "time dilation",
@@ -753,7 +741,6 @@ EFFECT_ALIASES = EFFECT_ALIASES = {
     "fragmented time": "time fragmentation",
     "time loop": "looping sense of time",
     "time looping": "looping sense of time",
-
     # selfhood
     "self change": "selfhood change",
     "dissociated": "dissociation",
@@ -773,7 +760,6 @@ EFFECT_ALIASES = EFFECT_ALIASES = {
     "out-of-body": "disembodiment",
     "unity": "unity experience",
     "oneness with everything": "unity experience",
-
     # spiritual
     "spiritual experiences": "spiritual experience",
     "spiritual experience": "spiritual experience",
@@ -789,7 +775,6 @@ EFFECT_ALIASES = EFFECT_ALIASES = {
     "oneness": "oneness",
     "presence": "contact-with-presence",
     "presence felt": "contact-with-presence",
-
     # social
     "social change": "social change",
     "more social": "sociability enhancement",
@@ -809,7 +794,6 @@ EFFECT_ALIASES = EFFECT_ALIASES = {
     "connectedness": "feeling connected",
     "felt alienated": "feeling alienated",
     "alienation": "feeling alienated",
-
     # tactile
     "tactile effects": "tactile change",
     "enhanced touch": "enhanced touch",
@@ -819,7 +803,6 @@ EFFECT_ALIASES = EFFECT_ALIASES = {
     "pleasant touch enhanced": "pleasant touch amplification",
     "touch felt amazing": "pleasant touch amplification",
     "touch felt awful": "unpleasant touch amplification",
-
     # sexual
     "sexual effects": "sexual change",
     "higher libido": "increased libido",
@@ -829,7 +812,6 @@ EFFECT_ALIASES = EFFECT_ALIASES = {
     "more sensual": "increased sensuality",
     "sexual touch enhancement": "tactile sensual enhancement",
     "sexual dysfunction": "sexual dysfunction",
-
     # thermal
     "temperature change": "temperature change",
     "felt hot": "feeling hot",
@@ -837,7 +819,6 @@ EFFECT_ALIASES = EFFECT_ALIASES = {
     "felt cold": "feeling cold",
     "cold": "feeling cold",
     "temperature swings": "temperature fluctuation",
-
     # sleep
     "sleep issues": "sleep disturbance",
     "insomnia": "insomnia",
@@ -860,7 +841,6 @@ def build_controlled_vocabulary_text() -> str:
         canonical_effects = ", ".join(effects.keys())
         lines.append(f"- {domain}: {canonical_effects}")
     return "\n".join(lines)
-
 
 
 SYSTEM_PROMPT = f"""
@@ -989,7 +969,9 @@ def build_doc_payload(doc: dict) -> dict:
         "footdata": {
             "exp_year": (doc.get("footdata") or {}).get("exp_year"),
             "gender": (doc.get("footdata") or {}).get("gender"),
-            "age_at_time_of_experience": (doc.get("footdata") or {}).get("age_at_time_of_experience"),
+            "age_at_time_of_experience": (doc.get("footdata") or {}).get(
+                "age_at_time_of_experience"
+            ),
             "published": (doc.get("footdata") or {}).get("published"),
         },
     }
@@ -1075,7 +1057,7 @@ def parse_response_json(content: str) -> dict:
     try:
         return json.loads(content)
     except JSONDecodeError as exc:
-        content_preview = content[max(0, exc.pos - 120):exc.pos + 120]
+        content_preview = content[max(0, exc.pos - 120) : exc.pos + 120]
         raise ValueError(
             "Mistral returned invalid JSON. This is often caused by output truncation; "
             "try increasing MAX_COMPLETION_TOKENS or decreasing MAX_REPORT_TEXT_CHARS / "
@@ -1168,9 +1150,11 @@ def build_effect_group_key(
         tag.domain,
         tag.effect,
         tag.parent_effect,
-        tag.detail.strip().lower()
-        if isinstance(tag.detail, str) and tag.detail.strip()
-        else None,
+        (
+            tag.detail.strip().lower()
+            if isinstance(tag.detail, str) and tag.detail.strip()
+            else None
+        ),
     )
 
 
@@ -1280,7 +1264,9 @@ def append_note(existing_note: Optional[str], extra_note: str) -> str:
     return f"{existing_note.strip()} {extra_note}"
 
 
-def summarize_rejected_tags(rejected_tags: List[str], max_examples: int = 5) -> Optional[str]:
+def summarize_rejected_tags(
+    rejected_tags: List[str], max_examples: int = 5
+) -> Optional[str]:
     if not rejected_tags:
         return None
 
@@ -1290,9 +1276,7 @@ def summarize_rejected_tags(rejected_tags: List[str], max_examples: int = 5) -> 
             unique_examples.append(tag)
 
     example_text = ", ".join(unique_examples[:max_examples])
-    note = (
-        f"Rejected {len(rejected_tags)} unsupported effect tag proposals during validation."
-    )
+    note = f"Rejected {len(rejected_tags)} unsupported effect tag proposals during validation."
     if example_text:
         note = f"{note} Examples: {example_text}."
     return note
@@ -1411,7 +1395,11 @@ def sanitize_extraction_payload(raw_result: dict, dose_table: List[dict]) -> dic
                 }
             )
 
-        if invalid_dose_ref_found and attribution_type != "unknown" and not sanitized_dose_refs:
+        if (
+            invalid_dose_ref_found
+            and attribution_type != "unknown"
+            and not sanitized_dose_refs
+        ):
             attribution_type = "unknown"
             attribution_note = append_note(
                 attribution_note,
@@ -1501,11 +1489,11 @@ def merge_extraction_results(results: List[ExtractionResult]) -> ExtractionResul
     )
 
 
-def enrich_result_with_dose_table(result: ExtractionResult, dose_table: List[dict]) -> ExtractionResult:
+def enrich_result_with_dose_table(
+    result: ExtractionResult, dose_table: List[dict]
+) -> ExtractionResult:
     dose_index = {
-        entry["dose_id"]: entry
-        for entry in dose_table
-        if entry.get("dose_id")
+        entry["dose_id"]: entry for entry in dose_table if entry.get("dose_id")
     }
 
     for tag in result.tags:
@@ -1524,7 +1512,9 @@ def enrich_result_with_dose_table(result: ExtractionResult, dose_table: List[dic
     return result
 
 
-def extract_effects_for_payload(client: Mistral, model: str, payload: dict) -> ExtractionResult:
+def extract_effects_for_payload(
+    client: Mistral, model: str, payload: dict
+) -> ExtractionResult:
     max_completion_tokens = int(
         os.getenv("MAX_COMPLETION_TOKENS", str(DEFAULT_MAX_COMPLETION_TOKENS))
     )
@@ -1534,7 +1524,9 @@ def extract_effects_for_payload(client: Mistral, model: str, payload: dict) -> E
         inputs=[
             {
                 "role": "user",
-                "content": USER_TEMPLATE.format(doc_json=json.dumps(payload, ensure_ascii=False)),
+                "content": USER_TEMPLATE.format(
+                    doc_json=json.dumps(payload, ensure_ascii=False)
+                ),
             },
         ],
         instructions=SYSTEM_PROMPT,
@@ -1570,7 +1562,9 @@ def extract_effects(client: Mistral, model: str, doc: dict) -> ExtractionResult:
     if len(report_text) <= max_report_text_chars:
         return extract_effects_for_payload(client, model, payload)
 
-    chunks = split_text_into_chunks(report_text, chunk_size=chunk_size, overlap=chunk_overlap)
+    chunks = split_text_into_chunks(
+        report_text, chunk_size=chunk_size, overlap=chunk_overlap
+    )
     chunk_results = []
 
     for chunk in chunks:
@@ -1600,7 +1594,13 @@ def extract_effects(client: Mistral, model: str, doc: dict) -> ExtractionResult:
     return merged_result
 
 
-def persist_result(collection, doc: dict, result: ExtractionResult, model: str, source_collection_name: str):
+def persist_result(
+    collection,
+    doc: dict,
+    result: ExtractionResult,
+    model: str,
+    source_collection_name: str,
+):
     now = datetime.now(timezone.utc)
     exp_id = doc.get("exp_id")
 
@@ -1628,12 +1628,12 @@ def persist_result(collection, doc: dict, result: ExtractionResult, model: str, 
     )
 
     if update_result.matched_count == 0 and update_result.upserted_id is None:
-        raise RuntimeError(
-            f"MongoDB persist failed for exp_id={exp_id!r}"
-        )
+        raise RuntimeError(f"MongoDB persist failed for exp_id={exp_id!r}")
 
 
-def mark_error(collection, doc: dict, model: str, error_message: str, source_collection_name: str):
+def mark_error(
+    collection, doc: dict, model: str, error_message: str, source_collection_name: str
+):
     now = datetime.now(timezone.utc)
     exp_id = doc.get("exp_id")
 
@@ -1652,7 +1652,7 @@ def mark_error(collection, doc: dict, model: str, error_message: str, source_col
                     "status": "error",
                     "error": error_message[:2000],
                     "extracted_at": now,
-                }
+                },
             }
         },
         upsert=True,
@@ -1670,7 +1670,9 @@ def load_source_batch(source_collection, query: dict, batch_size: int) -> list[d
     """Avoid holding a Mongo cursor open while each doc is processed downstream."""
     try:
         return list(
-            source_collection.find(query, max_time_ms=30000).sort("_id", 1).limit(batch_size)
+            source_collection.find(query, max_time_ms=30000)
+            .sort("_id", 1)
+            .limit(batch_size)
         )
     except CursorNotFound:
         print(
@@ -1679,7 +1681,9 @@ def load_source_batch(source_collection, query: dict, batch_size: int) -> list[d
             flush=True,
         )
         return list(
-            source_collection.find(query, max_time_ms=30000).sort("_id", 1).limit(batch_size)
+            source_collection.find(query, max_time_ms=30000)
+            .sort("_id", 1)
+            .limit(batch_size)
         )
 
 
@@ -1704,7 +1708,9 @@ def load_pending_batch(
         if last_seen_id is not None:
             query["_id"] = {"$gt": last_seen_id}
 
-        candidate_docs = load_source_batch(source_collection, query, source_scan_batch_size)
+        candidate_docs = load_source_batch(
+            source_collection, query, source_scan_batch_size
+        )
         if not candidate_docs:
             break
 
@@ -1712,9 +1718,7 @@ def load_pending_batch(
         last_seen_id = candidate_docs[-1]["_id"]
 
         candidate_exp_ids = [
-            doc.get("exp_id")
-            for doc in candidate_docs
-            if doc.get("exp_id") is not None
+            doc.get("exp_id") for doc in candidate_docs if doc.get("exp_id") is not None
         ]
 
         completed_exp_ids = set()
@@ -1751,7 +1755,9 @@ def main():
     mongo_source_collection = os.getenv("MONGO_SOURCE_COLLECTION", "erowid")
     mongo_target_collection = os.getenv("MONGO_TARGET_COLLECTION", "erowid_effects")
     batch_size = int(os.getenv("BATCH_SIZE", "10"))
-    source_scan_batch_size = int(os.getenv("SOURCE_SCAN_BATCH_SIZE", str(batch_size * 5)))
+    source_scan_batch_size = int(
+        os.getenv("SOURCE_SCAN_BATCH_SIZE", str(batch_size * 5))
+    )
     dry_run = os.getenv("DRY_RUN", "false").lower() == "true"
 
     mongo = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
@@ -1810,7 +1816,11 @@ def main():
                 )
             else:
                 persist_result(
-                    target_collection, doc, result, mistral_model, mongo_source_collection
+                    target_collection,
+                    doc,
+                    result,
+                    mistral_model,
+                    mongo_source_collection,
                 )
 
             processed += 1
@@ -1820,7 +1830,11 @@ def main():
             print(f"ERROR exp_id={exp_id}: {e}", file=sys.stderr, flush=True)
             if not dry_run:
                 mark_error(
-                    target_collection, doc, mistral_model, str(e), mongo_source_collection
+                    target_collection,
+                    doc,
+                    mistral_model,
+                    str(e),
+                    mongo_source_collection,
                 )
 
     print(f"Done. Processed {processed} documents.", flush=True)
