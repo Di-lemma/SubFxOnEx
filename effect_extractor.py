@@ -364,6 +364,7 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "skin sensitivity": "tactile change",
         "pleasant touch amplification": "tactile change",
         "unpleasant touch amplification": "tactile change",
+        "texture recognition suppression": "tactile change"
     },
     "sexual": {
         "sexual change": "sexual change",
@@ -372,6 +373,7 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "increased sensuality": "sexual change",
         "tactile sensual enhancement": "sexual change",
         "sexual dysfunction": "sexual change",
+        "orgasm enhancement": "sexual change",
     },
     "thermal": {
         "temperature change": "temperature change",
