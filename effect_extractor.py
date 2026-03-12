@@ -10,6 +10,7 @@ from json import JSONDecodeError
 from typing import List, Literal, Optional
 
 from mistralai import Mistral
+from mistralai.models import CompletionArgs, JSONSchema, ResponseFormat
 from pydantic import BaseModel, Field
 from pymongo import MongoClient
 from pymongo.errors import CursorNotFound
@@ -131,7 +132,6 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "enhanced colors": "visual distortions",
         "brightness enhancement": "visual distortions",
         "contrast enhancement": "visual distortions",
-        "visual sharpening": "visual distortions",
         "visual clarity": "visual distortions",
         "visual snow": "visual distortions",
         "pattern recognition enhancement": "visual distortions",
@@ -216,6 +216,7 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "numbness": "body load",
         "warmth": "body load",
         "coldness": "body load",
+        "temperature fluctuation": "body load",
         "flushing": "body load",
         "chills": "body load",
         "goosebumps": "body load",
@@ -298,7 +299,6 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "cognitive change": "cognitive change",
         "confusion": "cognitive change",
         "mental clarity": "cognitive change",
-        "clear-headedness": "cognitive change",
         "foggy thinking": "cognitive change",
         "racing thoughts": "cognitive change",
         "thought slowing": "cognitive change",
@@ -371,8 +371,6 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         # Reported realization or reflection concerning fundamental aspects of existence, such as meaning, identity, mortality, purpose, or the nature of being.
         "cosmic significance": "spiritual experience",
         # Reported sense that events, thoughts, or perceptions carry immense universal importance or are connected to a larger cosmic order or purpose.
-        "oneness": "spiritual experience",
-        # Reported experience of unity or dissolution of boundaries between self and other entities, the environment, or the universe.
         "contact-with-presence": "spiritual experience",
         # Reported sensation of encountering, communicating with, or being accompanied by an unseen entity, intelligence, or presence.
     },
@@ -407,12 +405,6 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "sexual dysfunction": "sexual change",
         "orgasm enhancement": "sexual change",
     },
-    "thermal": {
-        "temperature change": "temperature change",
-        "feeling hot": "temperature change",
-        "feeling cold": "temperature change",
-        "temperature fluctuation": "temperature change",
-    },
     "sleep": {
         "sleep disturbance": "sleep disturbance",
         "insomnia": "sleep disturbance",
@@ -425,7 +417,7 @@ CONTROLLED_EFFECT_ONTOLOGY = {
     },
 }
 
-EFFECT_ALIASES = EFFECT_ALIASES = {
+EFFECT_ALIASES = {
     # visual: broad / umbrella
     "visual distortion": "visual distortions",
     "visual distortions": "visual distortions",
@@ -515,8 +507,8 @@ EFFECT_ALIASES = EFFECT_ALIASES = {
     "everything looked brighter": "brightness enhancement",
     "contrast enhancement": "contrast enhancement",
     "higher contrast": "contrast enhancement",
-    "sharper vision": "visual sharpening",
-    "visual sharpening": "visual sharpening",
+    "sharper vision": "visual clarity",
+    "visual sharpening": "visual clarity",
     "clearer vision": "visual clarity",
     "enhanced clarity": "visual clarity",
     "crystal clear vision": "visual clarity",
@@ -728,8 +720,8 @@ EFFECT_ALIASES = EFFECT_ALIASES = {
     "mental confusion": "confusion",
     "clear mind": "mental clarity",
     "mental clarity": "mental clarity",
-    "clear headed": "clear-headedness",
-    "clear-headed": "clear-headedness",
+    "clear headed": "mental clarity",
+    "clear-headed": "mental clarity",
     "brain fog": "foggy thinking",
     "foggy": "foggy thinking",
     "racing mind": "racing thoughts",
@@ -806,7 +798,7 @@ EFFECT_ALIASES = EFFECT_ALIASES = {
     "existential insight": "existential insight",
     "cosmic importance": "cosmic significance",
     "cosmic significance": "cosmic significance",
-    "oneness": "oneness",
+    "oneness": "unity experience",
     "presence": "contact-with-presence",
     "presence felt": "contact-with-presence",
     # social
@@ -846,12 +838,12 @@ EFFECT_ALIASES = EFFECT_ALIASES = {
     "more sensual": "increased sensuality",
     "sexual touch enhancement": "tactile sensual enhancement",
     "sexual dysfunction": "sexual dysfunction",
-    # thermal
-    "temperature change": "temperature change",
-    "felt hot": "feeling hot",
-    "hot": "feeling hot",
-    "felt cold": "feeling cold",
-    "cold": "feeling cold",
+    # thermal / temperature
+    "temperature change": "body load",
+    "felt hot": "warmth",
+    "hot": "warmth",
+    "felt cold": "coldness",
+    "cold": "coldness",
     "temperature swings": "temperature fluctuation",
     # sleep
     "sleep issues": "sleep disturbance",
@@ -877,15 +869,39 @@ def build_controlled_vocabulary_text() -> str:
     return "\n".join(lines)
 
 
+ONTOLOGY_BOUNDARY_RULES = """
+- Assign a label only when the text grounds a distinct phenomenological effect, not merely a valence judgment, interpretation, or consequence.
+- Choose the narrowest justified canonical label. Do not stack parent and child labels for the same evidence.
+- Use broad fallback labels only when the text clearly supports the domain-level change but does not support any more specific canonical label.
+- Do not label generic intensity language such as "strong", "weird", "overwhelming", "different", or "intense" without a grounded effect description.
+- Do not infer internal states from behavior alone. For example, talking more does not by itself prove euphoria, empathy, mania, or stimulation.
+- Do not infer perceptual effects from abstract or metaphorical language unless the report clearly describes a changed perception.
+
+Boundary notes for commonly confused terms:
+- `texture rippling`: surface texture appears to ripple or undulate. `surface breathing`: the whole surface appears to expand and contract. `melting/flowing`: forms appear to liquefy, sag, or flow.
+- `visual trails`: moving objects leave trailing traces. `afterimages`: an image persists after the object or gaze has shifted.
+- `pattern recognition enhancement`: the report says patterns stand out more readily in real stimuli. `pareidolia`: the report says ambiguous stimuli are perceived as faces, figures, or meaningful forms.
+- `auditory enhancement`: broad increase in salience or richness of sound. `sound amplification`: sounds are louder. `sound clarity enhancement`: sounds are cleaner, sharper, or more distinct.
+- `stimulation`: keyed-up bodily activation, drive, or activation pressure. `physical energy`: increased bodily vigor or energy without the keyed-up quality.
+- `sedation`: the body feels slowed, heavy, or tranquilized. `fatigue`: tiredness or depletion. `drowsiness`: sleepiness or being close to sleep.
+- `mental clarity`: thinking feels clearer or less clouded overall. `increased focus`: attention is sustained or easier to direct toward something.
+- `anxiety`: diffuse anxious distress. `apprehension`: anticipatory nervousness. `fear`: felt fright about a perceived threat. `panic`: acute overwhelming fear with loss of control.
+- `dissociation`: detachment or disconnection without a narrower selfhood change. `depersonalization`: detached from self. `derealization`: surroundings feel unreal.
+- `unity experience`: loss or softening of the boundary between self and world/others. `feeling connected`: interpersonal or social connectedness without altered self-boundary. `contact-with-presence`: sensed encounter with an entity or presence.
+""".strip()
+
+
 SYSTEM_PROMPT = f"""
 You are a strict information extraction system. You will be extracting subjective effects from a trip report on either a single substance, or a substance combination.
 
 Task:
-Extract ONLY subjective effects that are explicitly supported by the report text and attributable to the listed dose_table entries.
+Extract ONLY subjective effects that are directly stated or strongly and locally supported by the report text, and attributable to the listed dose_table entries.
 
 Non-negotiable constraints:
 - Use ONLY the report text as evidence.
 - Do NOT use background knowledge about pharmacology, drug classes, common effects, or likely implications.
+- Do NOT infer an effect from setting, dose size, substance identity, behavior, or outcome when the phenomenology itself is not described.
+- Treat the ontology as narrow and literal. If the wording does not clearly meet a label definition, omit it.
 - When uncertain, omit the tag.
 - Prefer omission over inference.
 
@@ -919,6 +935,7 @@ Dose reference rules:
 Evidence constraints:
 - Every extracted tag must be supported by a short, local quote or minimally trimmed excerpt from the text.
 - text_detail must stay close to the exact wording and must not introduce interpretation.
+- A tag is allowed only when the excerpt itself would let a careful annotator justify that exact label without outside context.
 - If no short supporting excerpt exists, omit the tag.
 
 De-duplication constraints:
@@ -930,6 +947,10 @@ Ontology constraints:
 - Map only to canonical tags from the controlled vocabulary.
 - Do not invent tags.
 - Use broad fallback tags only when a more specific canonical tag is not directly supported.
+- Do not output a label whose boundary depends on reading beyond the quoted text.
+
+Ontology boundary rules:
+{ONTOLOGY_BOUNDARY_RULES}
 
 Examples:
 - If d1 and d2 are both MDMA and the effect is described after a redose or as cumulative across both doses, use attribution_type="single_substance" and include [d1, d2].
@@ -1011,14 +1032,15 @@ def build_doc_payload(doc: dict) -> dict:
     }
 
 
-def build_response_format() -> dict:
-    return {
-        "type": "json_schema",
-        "json_schema": {
-            "name": "subjective_effect_extraction",
-            "schema": ExtractionResult.model_json_schema(),
-        },
-    }
+def build_response_format() -> ResponseFormat:
+    return ResponseFormat(
+        type="json_schema",
+        json_schema=JSONSchema(
+            name="subjective_effect_extraction",
+            schema=ExtractionResult.model_json_schema(),
+            strict=True,
+        ),
+    )
 
 
 def normalize_effect_label(value: Optional[str]) -> Optional[str]:
@@ -1564,11 +1586,11 @@ def extract_effects_for_payload(
             },
         ],
         instructions=SYSTEM_PROMPT,
-        completion_args={
-            "temperature": 0,
-            "max_tokens": max_completion_tokens,
-            "response_format": build_response_format(),
-        },
+        completion_args=CompletionArgs(
+            temperature=0,
+            max_tokens=max_completion_tokens,
+            response_format=build_response_format(),
+        ),
         tools=[],
     )
 
