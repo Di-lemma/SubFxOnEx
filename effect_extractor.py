@@ -99,13 +99,27 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "texture rippling": "visual distortions",
         "surface breathing": "visual distortions",
         "melting/flowing": "visual distortions",
+        
         "warping": "visual distortions",
+         # Reported as objects, surfaces, faces, text, or parts of the visual field appearing bent, curved, stretched, twisted, or otherwise deformed from their expected shape.
+
         "morphing": "visual distortions",
+         # Reported as objects, faces, patterns, or visual forms appearing to transform continuously into other shapes, identities, structures, or appearances over time.
+
         "drifting": "visual distortions",
+         # Reported as stationary objects, patterns, surfaces, or parts of the visual field appearing to slide, float, sway, or slowly move despite remaining physically still.
+
         "shimmering": "visual distortions",
+         # Reported as surfaces, edges, textures, light, or the visual field appearing to flicker, glint, ripple, or display a subtle unsteady luminous instability.
+
         "visual vibration": "visual distortions",
+         # Reported as objects, edges, patterns, or the visual field appearing to tremble, oscillate, buzz, or rapidly quiver in place.
+
         "fractal imagery": "visual distortions",
+         # Reported as self-similar, recursively repeating visual forms appearing at multiple scales, often branching, proliferating, or unfolding in increasingly detailed patterns.
+
         "geometric imagery": "visual distortions",
+         # Reported as grids, lattices, tessellations, mandala-like forms, angular structures, or other abstract geometric patterns appearing in the visual field.
         "lattice imagery": "visual distortions",
         "tessellation": "visual distortions",
         "mandala imagery": "visual distortions",
@@ -124,15 +138,33 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "pareidolia": "visual distortions",
         "entity imagery": "visual distortions",
         "shadow imagery": "visual distortions",
+        
         "peripheral imagery": "visual distortions",
+         # Reported as the appearance of visual forms, motion, figures, patterns, or fleeting events in the peripheral field of vision that are not seen directly when looked at head-on.
+
         "size distortion": "visual distortions",
+         # Reported as objects, body parts, people, or features of the environment appearing unusually enlarged, reduced, inflated, shrunken, or otherwise altered in apparent size.
+
         "distance distortion": "visual distortions",
+         # Reported as objects, people, or parts of the environment appearing closer, farther away, or shifted in apparent distance relative to their expected position.
+
         "depth distortion": "visual distortions",
+         # Reported as an altered sense of spatial depth, with scenes or objects appearing unusually flattened, layered, recessed, expanded, or otherwise changed in three-dimensional structure.
+
         "foreshortening distortion": "visual distortions",
+         # Reported as body parts, objects, or spatial forms appearing unnaturally compressed, elongated, or altered along the line of view, as though perspective shortening is exaggerated or disrupted.
+
         "perspective distortion": "visual distortions",
+         # Reported as changes in the perceived geometric relations of a scene, with angles, proportions, orientation, or lines of sight appearing warped, skewed, tilted, or otherwise visually misaligned.
+
         "scene replacement": "visual distortions",
+         # Reported as part or all of the perceived visual scene appearing substituted with a different place, setting, or constructed environment, while the underlying physical surroundings may remain unchanged.
+
         "environmental transfiguration": "visual distortions",
+         # Reported as the surrounding environment appearing transformed in character, style, material, atmosphere, or identity, so that ordinary settings take on a distinctly altered or reimagined appearance.
+
         "symbolic imagery": "visual distortions",
+         # Reported as visual patterns, forms, objects, or scenes being perceived as containing symbolic, archetypal, mythic, sacred, or meaningful imagery beyond their ordinary appearance.
         "zooming": "visual distortions",
         "visual fragmentation": "visual distortions",
         "double vision": "visual distortions",
