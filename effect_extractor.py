@@ -294,6 +294,8 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "emotional catharsis": "emotional change",
         "helplessness": "emotional change",
         "suspiciousness": "emotional change",
+        "anxiety relief": "emotional change",
+        "anxiety suppression": "emotional change",
     },
     "cognitive": {
         "cognitive change": "cognitive change",
@@ -716,6 +718,16 @@ EFFECT_ALIASES = {
     "awe": "awe",
     "wonder": "wonder",
     "giddy": "giddiness",
+    "no anxiety": "anxiety relief",
+    "anxiety went away": "anxiety relief",
+    "anxiety gone": "anxiety relief",
+    "anxiolytic effect": "anxiety relief",
+    "felt no anxiety": "anxiety relief",
+    "anxiety dissolved": "anxiety relief",
+    "anxiety disappeared": "anxiety relief",
+    "reduced anxiety": "anxiety relief",
+    "anxiety reduced": "anxiety relief",
+    "anxiety lifted": "anxiety relief",
     # cognitive
     "mental confusion": "confusion",
     "clear mind": "mental clarity",
@@ -876,6 +888,8 @@ ONTOLOGY_BOUNDARY_RULES = """
 - Do not label generic intensity language such as "strong", "weird", "overwhelming", "different", or "intense" without a grounded effect description.
 - Do not infer internal states from behavior alone. For example, talking more does not by itself prove euphoria, empathy, mania, or stimulation.
 - Do not infer perceptual effects from abstract or metaphorical language unless the report clearly describes a changed perception.
+- Do NOT assign an effect label when the text negates, abolishes, or describes the suppression of that experience. "I felt no anxiety" and "my anxiety disappeared" are evidence for the absence or relief of anxiety, not for anxiety itself.
+- When a report describes the removal, suppression, or relief of a normally unpleasant state, prefer the corresponding relief/suppression tag if one exists in the vocabulary, or omit if none exists.
 
 Boundary notes for commonly confused terms:
 - `texture rippling`: surface texture appears to ripple or undulate. `surface breathing`: the whole surface appears to expand and contract. `melting/flowing`: forms appear to liquefy, sag, or flow.
