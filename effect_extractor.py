@@ -287,6 +287,7 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "emotional blunting": "emotional change",
         "emotional sensitivity": "emotional change",
         "awe": "emotional change",
+        "enhanced appreciation of nature": "emotional change",
         "wonder": "emotional change",
         "surprise": "emotional change",
         "giddiness": "emotional change",
