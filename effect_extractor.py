@@ -297,6 +297,7 @@ CONTROLLED_EFFECT_ONTOLOGY = {
         "suspiciousness": "emotional change",
         "anxiety relief": "emotional change",
         "anxiety suppression": "emotional change",
+        "threat salience": "emotional change",
     },
     "cognitive": {
         "cognitive change": "cognitive change",
