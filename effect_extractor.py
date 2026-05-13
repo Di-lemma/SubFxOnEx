@@ -9,11 +9,10 @@ from difflib import SequenceMatcher
 from json import JSONDecodeError
 from typing import List, Literal, Optional
 
-from mistralai import Mistral
-from mistralai.models import CompletionArgs, JSONSchema, ResponseFormat
 from pydantic import BaseModel, Field
 from pymongo import MongoClient
 from pymongo.errors import CursorNotFound
+from zai import ZaiClient
 
 
 class DoseReference(BaseModel):
@@ -875,10 +874,37 @@ EFFECT_ALIASES = {
 }
 
 
-def build_controlled_vocabulary_text() -> str:
+def build_broad_fallback_effects() -> set[str]:
+    return {
+        effect
+        for effects in CONTROLLED_EFFECT_ONTOLOGY.values()
+        for effect, parent_effect in effects.items()
+        if effect == parent_effect
+    }
+
+
+BROAD_FALLBACK_EFFECTS = build_broad_fallback_effects()
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def build_controlled_vocabulary_text(
+    include_broad_fallbacks: bool = False,
+) -> str:
     lines = []
     for domain, effects in CONTROLLED_EFFECT_ONTOLOGY.items():
-        canonical_effects = ", ".join(effects.keys())
+        canonical_effects = ", ".join(
+            effect
+            for effect in effects
+            if include_broad_fallbacks or effect not in BROAD_FALLBACK_EFFECTS
+        )
+        if not canonical_effects:
+            continue
         lines.append(f"- {domain}: {canonical_effects}")
     return "\n".join(lines)
 
@@ -907,7 +933,55 @@ Boundary notes for commonly confused terms:
 """.strip()
 
 
-SYSTEM_PROMPT = f"""
+OUTPUT_CONTRACT = """
+Return exactly one JSON object and no prose, markdown, or commentary.
+
+The JSON object must have this shape:
+{
+  "tags": [
+    {
+      "domain": "canonical domain from the controlled vocabulary",
+      "effect": "canonical effect from the controlled vocabulary",
+      "subjective_effect": "same value as parent_effect for compatibility",
+      "parent_effect": "canonical parent effect from the controlled vocabulary",
+      "detail": "optional short subtype or null",
+      "attribution": {
+        "attribution_type": "single_substance | combination | unknown",
+        "dose_refs": [
+          {
+            "dose_id": "dose_id copied exactly from dose_table",
+            "substance": "substance copied or normalized from dose_table",
+            "dose": "dose phrase from dose_table or null",
+            "route": "route from dose_table or null"
+          }
+        ],
+        "attribution_note": "short note or null"
+      },
+      "text_detail": "short local evidence excerpt from report_text",
+      "confidence": 0.0
+    }
+  ],
+  "notes": "optional note string or null"
+}
+
+Use an empty tags array when nothing is sufficiently supported.
+""".strip()
+
+
+def build_system_prompt(
+    max_tags_per_payload: int,
+    max_text_detail_chars: int,
+    max_attribution_note_chars: int,
+    include_broad_fallbacks: bool,
+) -> str:
+    broad_fallback_effects_text = ", ".join(sorted(BROAD_FALLBACK_EFFECTS))
+    broad_fallback_instruction = (
+        "They may be used as effect values only when no narrower label is supported."
+        if include_broad_fallbacks
+        else "They must not be used as effect values; use them only as parent_effect rollups."
+    )
+
+    return f"""
 You are a strict information extraction system. You will be extracting subjective effects from a trip report on either a single substance, or a substance combination.
 
 Task:
@@ -920,6 +994,25 @@ Non-negotiable constraints:
 - Treat the ontology as narrow and literal. If the wording does not clearly meet a label definition, omit it.
 - When uncertain, omit the tag.
 - Prefer omission over inference.
+
+Specificity and usefulness constraints:
+- Extract at most {max_tags_per_payload} tags for this payload.
+- Prefer distinctive, concrete, information-rich effects over generic families or summary judgments.
+- When more than {max_tags_per_payload} effects are supported, keep the best-evidenced and most specific effects.
+- Skip generic umbrella observations such as "body load", "visuals", "headspace", "emotional change", "cognitive change", or "felt weird" unless the text locally supports a narrower canonical tag.
+- Use `detail` to preserve a short concrete subtype or nuance from the report when the canonical label is still less specific than the wording.
+- Keep `text_detail` under {max_text_detail_chars} characters.
+- Keep `attribution_note` under {max_attribution_note_chars} characters.
+
+Specificity examples:
+- Prefer `surface breathing`, `texture rippling`, `fractal imagery`, `visual trails`, or `enhanced colors` over `visual distortions`.
+- Prefer `jaw tension`, `tingling`, `temperature fluctuation`, `physical energy`, or `somatic heaviness` over `body load`.
+- Prefer `thought looping`, `novel associations`, `mental clarity`, or `memory impairment` over `cognitive change`.
+- Prefer `anxiety relief`, `emotional warmth`, `awe`, `panic`, or `emotional blunting` over `emotional change`.
+
+Broad fallback effect labels:
+- {broad_fallback_instruction}
+- Broad fallback labels: {broad_fallback_effects_text}
 
 Attribution constraints:
 - If dose_table is non-empty, extract ONLY effects attributable to one or more listed dose_table entries.
@@ -962,7 +1055,6 @@ De-duplication constraints:
 Ontology constraints:
 - Map only to canonical tags from the controlled vocabulary.
 - Do not invent tags.
-- Use broad fallback tags only when a more specific canonical tag is not directly supported.
 - Do not output a label whose boundary depends on reading beyond the quoted text.
 
 Ontology boundary rules:
@@ -974,8 +1066,12 @@ Examples:
 - If only d2 is clearly linked to the effect, include only [d2], not [d1, d2].
 
 Controlled vocabulary:
-{build_controlled_vocabulary_text()}
+{build_controlled_vocabulary_text(include_broad_fallbacks)}
+
+Output contract:
+{OUTPUT_CONTRACT}
 """
+
 
 USER_TEMPLATE = """
 Extract subjective effects from this report.
@@ -984,10 +1080,48 @@ Document:
 {doc_json}
 """
 
-DEFAULT_REPORT_CHUNK_SIZE_CHARS = 8000
-DEFAULT_REPORT_CHUNK_OVERLAP_CHARS = 1000
-DEFAULT_MAX_COMPLETION_TOKENS = 4000
-SAFER_MAX_REPORT_TEXT_CHARS = 8000
+DEFAULT_REPORT_CHUNK_SIZE_CHARS = 4000
+DEFAULT_REPORT_CHUNK_OVERLAP_CHARS = 600
+DEFAULT_MAX_COMPLETION_TOKENS = 6000
+DEFAULT_MAX_TAGS_PER_PAYLOAD = 12
+DEFAULT_MAX_TEXT_DETAIL_CHARS = 180
+DEFAULT_MAX_ATTRIBUTION_NOTE_CHARS = 180
+DEFAULT_MIN_RETRY_CHUNK_SIZE_CHARS = 1200
+SAFER_MAX_REPORT_TEXT_CHARS = 4000
+DEFAULT_ZAI_THINKING = "disabled"
+
+
+class InvalidModelJSONError(ValueError):
+    pass
+
+
+def env_int(name: str, default: int, minimum: Optional[int] = None) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        value = default
+    else:
+        try:
+            value = int(raw_value)
+        except ValueError as exc:
+            raise ValueError(f"{name} must be an integer") from exc
+
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{name} must be at least {minimum}")
+    return value
+
+
+def truncate_text(value: Optional[str], max_chars: int) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+
+    value = value.strip()
+    if not value:
+        return None
+    if max_chars <= 0 or len(value) <= max_chars:
+        return value
+    if max_chars <= 3:
+        return value[:max_chars]
+    return value[: max_chars - 3].rstrip() + "..."
 
 
 def normalize_substance_name(value) -> Optional[str]:
@@ -1048,15 +1182,15 @@ def build_doc_payload(doc: dict) -> dict:
     }
 
 
-def build_response_format() -> ResponseFormat:
-    return ResponseFormat(
-        type="json_schema",
-        json_schema=JSONSchema(
-            name="subjective_effect_extraction",
-            schema=ExtractionResult.model_json_schema(),
-            strict=True,
-        ),
-    )
+def build_response_format() -> dict:
+    return {"type": "json_object"}
+
+
+def build_thinking_config() -> dict:
+    thinking_type = os.getenv("ZAI_THINKING", DEFAULT_ZAI_THINKING).strip().lower()
+    if thinking_type not in {"enabled", "disabled"}:
+        raise ValueError("ZAI_THINKING must be either 'enabled' or 'disabled'")
+    return {"type": thinking_type}
 
 
 def normalize_effect_label(value: Optional[str]) -> Optional[str]:
@@ -1084,54 +1218,66 @@ def build_effect_index() -> dict[str, dict[str, str]]:
 EFFECT_INDEX = build_effect_index()
 
 
+def get_response_value(value, key: str, default=None):
+    if isinstance(value, dict):
+        return value.get(key, default)
+    return getattr(value, key, default)
+
+
 def extract_response_json(response) -> dict:
-    if hasattr(response, "outputs"):
-        outputs = response.outputs
-    elif isinstance(response, dict):
-        outputs = response.get("outputs", [])
-    else:
-        outputs = []
+    choices = get_response_value(response, "choices", [])
+    if not choices:
+        raise ValueError("Z.ai response did not contain any choices")
 
-    for output in outputs:
-        content = getattr(output, "content", None)
-        if content is None and isinstance(output, dict):
-            content = output.get("content")
+    choice = choices[0]
+    message = get_response_value(choice, "message")
+    if message is None:
+        raise ValueError("Z.ai response choice did not contain a message")
 
-        if isinstance(content, dict):
-            return content
+    content = get_response_value(message, "content")
+    if isinstance(content, dict):
+        return content
+    if isinstance(content, str):
+        return parse_response_json(content)
+    if isinstance(content, list):
+        text_parts = []
+        for item in content:
+            text = get_response_value(item, "text")
+            if text:
+                text_parts.append(text)
+                continue
 
-        if isinstance(content, str):
-            return parse_response_json(content)
+            nested_content = get_response_value(item, "content")
+            if isinstance(nested_content, str):
+                text_parts.append(nested_content)
 
-        if isinstance(content, list):
-            for item in content:
-                if isinstance(item, dict):
-                    text = item.get("text")
-                    if text:
-                        return parse_response_json(text)
+        if text_parts:
+            return parse_response_json("\n".join(text_parts))
 
-                    if item.get("content") and isinstance(item["content"], str):
-                        return parse_response_json(item["content"])
-
-                else:
-                    text = getattr(item, "text", None)
-                    if text:
-                        return parse_response_json(text)
-
-                    nested_content = getattr(item, "content", None)
-                    if isinstance(nested_content, str):
-                        return parse_response_json(nested_content)
-
-    raise ValueError("Mistral response did not contain a JSON payload in outputs")
+    raise ValueError("Z.ai response message did not contain a JSON payload")
 
 
 def parse_response_json(content: str) -> dict:
+    content = content.strip()
+    fenced_match = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", content, re.DOTALL)
+    if fenced_match:
+        content = fenced_match.group(1).strip()
+
     try:
         return json.loads(content)
     except JSONDecodeError as exc:
+        json_start = content.find("{")
+        json_end = content.rfind("}")
+        if 0 <= json_start < json_end:
+            extracted_content = content[json_start : json_end + 1]
+            try:
+                return json.loads(extracted_content)
+            except JSONDecodeError:
+                pass
+
         content_preview = content[max(0, exc.pos - 120) : exc.pos + 120]
-        raise ValueError(
-            "Mistral returned invalid JSON. This is often caused by output truncation; "
+        raise InvalidModelJSONError(
+            "Z.ai returned invalid JSON. This is often caused by output truncation; "
             "try increasing MAX_COMPLETION_TOKENS or decreasing MAX_REPORT_TEXT_CHARS / "
             f"REPORT_CHUNK_SIZE_CHARS. Parse error: {exc}. Nearby content: {content_preview!r}"
         ) from exc
@@ -1381,6 +1527,18 @@ def canonicalize_effect_tag(raw_tag: dict) -> tuple[Optional[dict], Optional[str
 
 
 def sanitize_extraction_payload(raw_result: dict, dose_table: List[dict]) -> dict:
+    allow_broad_fallback_effects = env_bool("ALLOW_BROAD_FALLBACK_EFFECTS", False)
+    max_text_detail_chars = env_int(
+        "MAX_TEXT_DETAIL_CHARS", DEFAULT_MAX_TEXT_DETAIL_CHARS, minimum=40
+    )
+    max_attribution_note_chars = env_int(
+        "MAX_ATTRIBUTION_NOTE_CHARS",
+        DEFAULT_MAX_ATTRIBUTION_NOTE_CHARS,
+        minimum=40,
+    )
+    max_tags_per_payload = env_int(
+        "MAX_TAGS_PER_PAYLOAD", DEFAULT_MAX_TAGS_PER_PAYLOAD, minimum=1
+    )
     dose_index = {
         entry["dose_id"]: entry
         for entry in dose_table
@@ -1390,6 +1548,7 @@ def sanitize_extraction_payload(raw_result: dict, dose_table: List[dict]) -> dic
     raw_tags = raw_result.get("tags")
     sanitized_tags = []
     rejected_tags = []
+    rejected_broad_tags = []
     for raw_tag in raw_tags if isinstance(raw_tags, list) else []:
         if not isinstance(raw_tag, dict):
             continue
@@ -1400,6 +1559,12 @@ def sanitize_extraction_payload(raw_result: dict, dose_table: List[dict]) -> dic
         if canonical_effect_tag is None:
             if rejected_effect_label:
                 rejected_tags.append(rejected_effect_label)
+            continue
+        if (
+            canonical_effect_tag["effect"] in BROAD_FALLBACK_EFFECTS
+            and not allow_broad_fallback_effects
+        ):
+            rejected_broad_tags.append(canonical_effect_tag["effect"])
             continue
         if not isinstance(text_detail, str) or not text_detail.strip():
             continue
@@ -1423,6 +1588,11 @@ def sanitize_extraction_payload(raw_result: dict, dose_table: List[dict]) -> dic
         attribution_note = raw_attribution.get("attribution_note")
         if not isinstance(attribution_note, str):
             attribution_note = None
+        else:
+            attribution_note = truncate_text(
+                attribution_note,
+                max_attribution_note_chars,
+            )
 
         sanitized_dose_refs = []
         raw_dose_refs = raw_attribution.get("dose_refs")
@@ -1438,6 +1608,10 @@ def sanitize_extraction_payload(raw_result: dict, dose_table: List[dict]) -> dic
                 continue
 
             dose_id = dose_id.strip()
+            if dose_index and dose_id not in dose_index:
+                invalid_dose_ref_found = True
+                continue
+
             source_entry = dose_index.get(dose_id, {})
             substance = raw_dose_ref.get("substance")
             if not isinstance(substance, str) or not substance.strip():
@@ -1490,7 +1664,7 @@ def sanitize_extraction_payload(raw_result: dict, dose_table: List[dict]) -> dic
                     "dose_refs": sanitized_dose_refs,
                     "attribution_note": attribution_note,
                 },
-                "text_detail": text_detail.strip(),
+                "text_detail": truncate_text(text_detail, max_text_detail_chars),
                 "confidence": confidence_value,
             }
         )
@@ -1498,9 +1672,35 @@ def sanitize_extraction_payload(raw_result: dict, dose_table: List[dict]) -> dic
     notes = raw_result.get("notes")
     if not isinstance(notes, str):
         notes = None
+    if len(sanitized_tags) > max_tags_per_payload:
+        sanitized_tags = sorted(
+            sanitized_tags,
+            key=lambda tag: (
+                tag.get("confidence", 0.0),
+                1 if tag.get("detail") else 0,
+                len(normalize_evidence_text(tag.get("text_detail", ""))),
+            ),
+            reverse=True,
+        )[:max_tags_per_payload]
+        notes = append_note(
+            notes,
+            (
+                f"Kept {max_tags_per_payload} highest-scoring tags after validation "
+                "because the model proposed more than MAX_TAGS_PER_PAYLOAD."
+            ),
+        )
     rejected_note = summarize_rejected_tags(rejected_tags)
     if rejected_note:
         notes = append_note(notes, rejected_note)
+    broad_rejected_note = summarize_rejected_tags(rejected_broad_tags)
+    if broad_rejected_note:
+        notes = append_note(
+            notes,
+            broad_rejected_note.replace(
+                "unsupported effect tag proposals",
+                "broad fallback effect tag proposals",
+            ),
+        )
 
     return {
         "tags": sanitized_tags,
@@ -1512,6 +1712,12 @@ def mergeable_note_paragraphs(note: str) -> List[str]:
     kept = []
     for paragraph in [p.strip() for p in note.split("\n\n") if p.strip()]:
         if paragraph.startswith("Rejected "):
+            kept.append(paragraph)
+        elif paragraph.startswith("Retried "):
+            kept.append(paragraph)
+        elif paragraph.startswith("Processed in "):
+            kept.append(paragraph)
+        elif paragraph.startswith("Kept "):
             kept.append(paragraph)
         elif "Malformed dose references were discarded during validation." in paragraph:
             kept.append(paragraph)
@@ -1585,15 +1791,37 @@ def enrich_result_with_dose_table(
 
 
 def extract_effects_for_payload(
-    client: Mistral, model: str, payload: dict
+    client: ZaiClient, model: str, payload: dict
 ) -> ExtractionResult:
-    max_completion_tokens = int(
-        os.getenv("MAX_COMPLETION_TOKENS", str(DEFAULT_MAX_COMPLETION_TOKENS))
+    max_completion_tokens = env_int(
+        "MAX_COMPLETION_TOKENS", DEFAULT_MAX_COMPLETION_TOKENS, minimum=1
+    )
+    max_tags_per_payload = env_int(
+        "MAX_TAGS_PER_PAYLOAD", DEFAULT_MAX_TAGS_PER_PAYLOAD, minimum=1
+    )
+    max_text_detail_chars = env_int(
+        "MAX_TEXT_DETAIL_CHARS", DEFAULT_MAX_TEXT_DETAIL_CHARS, minimum=40
+    )
+    max_attribution_note_chars = env_int(
+        "MAX_ATTRIBUTION_NOTE_CHARS",
+        DEFAULT_MAX_ATTRIBUTION_NOTE_CHARS,
+        minimum=40,
     )
 
-    response = client.beta.conversations.start(
+    response = client.chat.completions.create(
         model=model,
-        inputs=[
+        messages=[
+            {
+                "role": "system",
+                "content": build_system_prompt(
+                    max_tags_per_payload=max_tags_per_payload,
+                    max_text_detail_chars=max_text_detail_chars,
+                    max_attribution_note_chars=max_attribution_note_chars,
+                    include_broad_fallbacks=env_bool(
+                        "ALLOW_BROAD_FALLBACK_EFFECTS", False
+                    ),
+                ),
+            },
             {
                 "role": "user",
                 "content": USER_TEMPLATE.format(
@@ -1601,13 +1829,10 @@ def extract_effects_for_payload(
                 ),
             },
         ],
-        instructions=SYSTEM_PROMPT,
-        completion_args=CompletionArgs(
-            temperature=0,
-            max_tokens=max_completion_tokens,
-            response_format=build_response_format(),
-        ),
-        tools=[],
+        temperature=0,
+        max_tokens=max_completion_tokens,
+        response_format=build_response_format(),
+        thinking=build_thinking_config(),
     )
 
     raw_result = extract_response_json(response)
@@ -1617,22 +1842,101 @@ def extract_effects_for_payload(
     return enrich_result_with_dose_table(result, payload["dose_table"])
 
 
-def extract_effects(client: Mistral, model: str, doc: dict) -> ExtractionResult:
+def extract_effects_for_payload_with_json_retry(
+    client: ZaiClient,
+    model: str,
+    payload: dict,
+) -> ExtractionResult:
+    try:
+        return extract_effects_for_payload(client, model, payload)
+    except InvalidModelJSONError as exc:
+        report_text = payload.get("report_text", "") or ""
+        min_retry_chunk_size = env_int(
+            "MIN_RETRY_CHUNK_SIZE_CHARS",
+            DEFAULT_MIN_RETRY_CHUNK_SIZE_CHARS,
+            minimum=400,
+        )
+
+        if len(report_text) <= min_retry_chunk_size:
+            raise
+
+        retry_chunk_size = max(min_retry_chunk_size, len(report_text) // 2)
+        if retry_chunk_size >= len(report_text):
+            raise
+
+        configured_overlap = env_int(
+            "REPORT_CHUNK_OVERLAP_CHARS",
+            DEFAULT_REPORT_CHUNK_OVERLAP_CHARS,
+            minimum=0,
+        )
+        retry_overlap = min(
+            configured_overlap,
+            max(0, retry_chunk_size // 4),
+            retry_chunk_size - 1,
+        )
+        retry_chunks = split_text_into_chunks(
+            report_text,
+            chunk_size=retry_chunk_size,
+            overlap=retry_overlap,
+        )
+
+        if len(retry_chunks) <= 1:
+            raise
+
+        print(
+            (
+                "WARNING: Z.ai returned invalid JSON for "
+                f"exp_id={payload.get('exp_id')!r}; retrying in "
+                f"{len(retry_chunks)} smaller chunks. Original error: {exc}"
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
+
+        chunk_results = []
+        for chunk in retry_chunks:
+            chunk_payload = dict(payload)
+            chunk_payload["report_text"] = chunk.text
+            chunk_payload["report_chunk"] = {
+                "index": chunk.index,
+                "count": chunk.count,
+                "strategy": "json_retry_char_window_with_overlap",
+                "start_char": chunk.start,
+                "end_char": chunk.end,
+            }
+            chunk_results.append(
+                extract_effects_for_payload_with_json_retry(
+                    client,
+                    model,
+                    chunk_payload,
+                )
+            )
+
+        merged_result = merge_extraction_results(chunk_results)
+        retry_note = (
+            f"Retried in {len(retry_chunks)} smaller chunks after Z.ai returned "
+            "invalid JSON for a larger payload."
+        )
+        merged_result.notes = append_note(merged_result.notes, retry_note)
+        return merged_result
+
+
+def extract_effects(client: ZaiClient, model: str, doc: dict) -> ExtractionResult:
     payload = build_doc_payload(doc)
     report_text = payload.get("report_text", "") or ""
 
-    max_report_text_chars = int(
-        os.getenv("MAX_REPORT_TEXT_CHARS", str(SAFER_MAX_REPORT_TEXT_CHARS))
+    max_report_text_chars = env_int(
+        "MAX_REPORT_TEXT_CHARS", SAFER_MAX_REPORT_TEXT_CHARS, minimum=1
     )
-    chunk_size = int(
-        os.getenv("REPORT_CHUNK_SIZE_CHARS", str(DEFAULT_REPORT_CHUNK_SIZE_CHARS))
+    chunk_size = env_int(
+        "REPORT_CHUNK_SIZE_CHARS", DEFAULT_REPORT_CHUNK_SIZE_CHARS, minimum=1
     )
-    chunk_overlap = int(
-        os.getenv("REPORT_CHUNK_OVERLAP_CHARS", str(DEFAULT_REPORT_CHUNK_OVERLAP_CHARS))
+    chunk_overlap = env_int(
+        "REPORT_CHUNK_OVERLAP_CHARS", DEFAULT_REPORT_CHUNK_OVERLAP_CHARS, minimum=0
     )
 
     if len(report_text) <= max_report_text_chars:
-        return extract_effects_for_payload(client, model, payload)
+        return extract_effects_for_payload_with_json_retry(client, model, payload)
 
     chunks = split_text_into_chunks(
         report_text, chunk_size=chunk_size, overlap=chunk_overlap
@@ -1649,7 +1953,9 @@ def extract_effects(client: Mistral, model: str, doc: dict) -> ExtractionResult:
             "start_char": chunk.start,
             "end_char": chunk.end,
         }
-        chunk_results.append(extract_effects_for_payload(client, model, chunk_payload))
+        chunk_results.append(
+            extract_effects_for_payload_with_json_retry(client, model, chunk_payload)
+        )
 
     merged_result = merge_extraction_results(chunk_results)
     if merged_result.notes:
@@ -1687,7 +1993,7 @@ def persist_result(
                 "substance": doc.get("substance"),
                 "subjective_effect_tags": [tag.model_dump() for tag in result.tags],
                 "subjective_effect_extraction": {
-                    "model_provider": "mistral",
+                    "model_provider": "zai",
                     "model_name": model,
                     "notes": result.notes,
                     "tag_count": len(result.tags),
@@ -1719,7 +2025,7 @@ def mark_error(
                 "title": doc.get("title"),
                 "substance": doc.get("substance"),
                 "subjective_effect_extraction": {
-                    "model_provider": "mistral",
+                    "model_provider": "zai",
                     "model_name": model,
                     "status": "error",
                     "error": error_message[:2000],
@@ -1820,12 +2126,12 @@ def load_pending_batch(
 
 
 def main():
-    mistral_api_key = os.environ["MISTRAL_API_KEY"]
-    mistral_model = os.getenv("MISTRAL_MODEL", "mistral-large-2512")
+    zai_api_key = os.environ["ZAI_API_KEY"]
+    zai_model = os.getenv("ZAI_MODEL", "glm-5")
     mongo_uri = os.getenv("MONGO_URI", "mongodb://host.docker.internal:27017")
     mongo_db = os.getenv("MONGO_DB", "tripindex")
-    mongo_source_collection = os.getenv("MONGO_SOURCE_COLLECTION", "erowid")
-    mongo_target_collection = os.getenv("MONGO_TARGET_COLLECTION", "erowid_effects")
+    mongo_source_collection = os.getenv("MONGO_SOURCE_COLLECTION", "erowid-clean")
+    mongo_target_collection = os.getenv("MONGO_TARGET_COLLECTION", "erowid-effects-1")
     batch_size = int(os.getenv("BATCH_SIZE", "10"))
     source_scan_batch_size = int(
         os.getenv("SOURCE_SCAN_BATCH_SIZE", str(batch_size * 5))
@@ -1838,7 +2144,7 @@ def main():
     source_collection = db[mongo_source_collection]
     target_collection = db[mongo_target_collection]
 
-    mistral_client = Mistral(api_key=mistral_api_key)
+    zai_client = ZaiClient(api_key=zai_api_key)
 
     print(
         (
@@ -1872,7 +2178,7 @@ def main():
         print(f"Processing exp_id={exp_id} ...", flush=True)
 
         try:
-            result = extract_effects(mistral_client, mistral_model, doc)
+            result = extract_effects(zai_client, zai_model, doc)
 
             if dry_run:
                 print(
@@ -1891,7 +2197,7 @@ def main():
                     target_collection,
                     doc,
                     result,
-                    mistral_model,
+                    zai_model,
                     mongo_source_collection,
                 )
 
@@ -1904,7 +2210,7 @@ def main():
                 mark_error(
                     target_collection,
                     doc,
-                    mistral_model,
+                    zai_model,
                     str(e),
                     mongo_source_collection,
                 )
