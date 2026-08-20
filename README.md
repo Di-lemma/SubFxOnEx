@@ -1,265 +1,243 @@
-# Subjective Effect Ontology Extractor for Trip Reports
+# Erowid Effect Extractor
 
-Extract **high‑precision** subjective drug effects from narrative experience reports (Erowid, etc.) using Mistral AI, map them to a controlled ontology, attribute them to specific doses, and store the results in MongoDB – ready for knowledge graph construction.
+This project runs a Dockerized Z.ai GLM extractor that converts Erowid report
+text into grounded, controlled subjective-effect tags stored in MongoDB.
 
-> This pipeline is built for recall‑constrained information extraction. It prefers to omit a tag rather than guess, and it validates every output against a strict controlled vocabulary and dose table.
+Each extracted tag is stored with a controlled ontology shape:
+`domain`, `effect`, `parent_effect`, optional `detail`, attribution metadata, `text_detail`, and `confidence`.
+The legacy `subjective_effect` field is still written for compatibility, but now mirrors the broader `parent_effect` rollup rather than the more specific `effect`.
+Broad rollup labels such as `visual distortions` or `body load` are fallback-only; the extractor now prefers more specific canonical tags when supported by the report text.
+By default, broad rollup labels are no longer accepted as `effect` values at all; they are kept only in `parent_effect` for rollups.
+Validation may append notes about rejected unsupported tag proposals so ontology gaps are visible during review. The Mongo tag schema is unchanged: ontology hierarchy, source dose metadata, exact evidence grounding, and attribution type are reconstructed deterministically before persistence.
 
-## A good tag should answer:
+The embedded vocabulary spans 21 domains and 506 ontology nodes: 485 atomic
+effects and 21 broad parent rollups.
 
-> # What exact wording in the report would justify this tag?
+The extractor does not treat model output as ground truth. It rejects invented ontology labels, non-contiguous or ungrounded evidence, ambiguous dose IDs, malformed dose references, broad fallback labels, and a small set of explicit polarity contradictions. `MIN_TAG_CONFIDENCE` defaults to `0` because model self-confidence is not calibrated without a labelled evaluation set; it remains available as an opt-in filter.
 
----
+See [ONTOLOGY.md](ONTOLOGY.md) for the atomicity rules, independent research
+provenance, compatibility policy, and term-admission checklist.
 
-## Features
+Ontology identity is deterministic. `ONTOLOGY_HASH` covers the canonical
+hierarchy, the final resolved alias map, safe and unsafe deprecated redirects,
+compatibility details, and the ambiguous-alias blocklist. Changes to any of
+those normalization semantics therefore change the pipeline fingerprint used
+by the stale-result policy.
 
-- **\*Controlled\* effect ontology that converges** – 220+ canonical effect tags across 15 domains (visual, cognitive, somatic, emotional, etc.)
-- **Dose attribution** – Links each effect to the specific dose(s) from the report’s `dose_table` (single substance, combination, or unknown)
-- **Alias resolution** – Maps free‑text descriptions to canonical tags using a comprehensive alias dictionary (e.g., *“walls breathing”* → `surface breathing`)
-- **Intelligent chunking** – Splits long reports into overlapping chunks while preserving context, then merges and deduplicates results
-- **MongoDB persistence** – Stores extracted tags, metadata, and processing status; supports incremental batch processing
-- **Dry‑run mode** – Preview extractions without writing to the database
-- **Environment‑configurable** – All parameters (chunk size, batch size, model name, etc.) can be set via environment variables
+## Setup
 
----
-
-## How It Works
-
-1. **Load pending documents** from a source MongoDB collection (e.g., `erowid`) that haven’t been processed yet.
-2. **Build a payload** containing the report text, dose table, and metadata.
-3. **Send to Mistral** with a strict JSON‑schema response format and a system prompt that enforces the controlled vocabulary and attribution rules.
-4. **Validate & canonicalize** the model’s output – reject out‑of‑vocabulary effects, fix dose references, and apply alias mapping.
-5. **Handle long reports** – if the report exceeds a threshold, it’s split into overlapping chunks, each processed separately, then merged.
-6. **Persist** the final `ExtractionResult` (tags + notes) into the target MongoDB collection (e.g., `erowid_effects`), or print it in dry‑run mode.
-
----
-
-## Ontology Features
-
-| report range | new effects |
-| ------------ | ----------- |
-| 1–100        | **99**      |
-| 101–200      | **100**     |
-| 201–300      | **27**      |
-
-The ontology converges instead of exploding, as additional reports are tagged.
-
-### Phase 1: Ontology Bootstrapping
-
-Almost every report introduces something new.
-
-This is expected because the model is still encountering new categories like:
-
-- social confidence
-- emotional warmth
-- visual distortions
-- patterning
-- dissociation
-- nausea
-
-etc.
-
-### Phase 2: Saturation
-
-```
-report 201–300 → 27 new effects
-```
-
-which is a **3–4× drop**.
-
-Now reports mostly reuse existing labels instead of inventing new ones.
-
----
-
-## Requirements
-
-- Python **3.10+**
-- MongoDB (local or remote)
-- [Mistral AI API key](https://console.mistral.ai/)
-
----
-
-## 🚀 Installation
+1. Create a private environment file with
+   `install -m 600 .env.example .env`.
+2. Fill in `ZAI_API_KEY` and adjust the Mongo settings if needed. By default the extractor reads from `tripindex.erowid-clean` and writes extracted effects to `tripindex.erowid-effects-1`.
+3. Build the image:
 
 ```bash
-git clone https://github.com/your-org/subjective-effect-extractor.git
-cd subjective-effect-extractor
-python -m venv venv
-source venv/bin/activate   # or `venv\Scripts\activate` on Windows
-pip install -r requirements.txt
+docker compose build
 ```
 
-**`requirements.txt`** (minimal):
+The container runs as the non-root `extractor` user with a read-only root
+filesystem, a disposable `/tmp` tmpfs, all Linux capabilities dropped, and
+`no-new-privileges` enabled.
 
-```
-mistralai>=0.4.0
-pymongo>=4.5
-pydantic>=2.0
-```
+## Run the extractor
 
----
-
-## ⚙️ Configuration
-
-All settings are controlled via environment variables. Create a `.env` file or export them in your shell.
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MISTRAL_API_KEY` | **required** | Your Mistral API key |
-| `MISTRAL_MODEL` | `mistral-large-2512` | Model name (must support JSON schema) |
-| `MONGO_URI` | `mongodb://host.docker.internal:27017` | MongoDB connection string |
-| `MONGO_DB` | `tripindex` | Database name |
-| `MONGO_SOURCE_COLLECTION` | `erowid` | Collection containing raw reports |
-| `MONGO_TARGET_COLLECTION` | `erowid_effects` | Collection where results will be stored |
-| `BATCH_SIZE` | `10` | Number of documents to process in one run |
-| `SOURCE_SCAN_BATCH_SIZE` | `BATCH_SIZE * 5` | Internal batch size for scanning source documents |
-| `MAX_REPORT_TEXT_CHARS` | `8000` | If report exceeds this, it will be chunked |
-| `REPORT_CHUNK_SIZE_CHARS` | `8000` | Character size of each chunk |
-| `REPORT_CHUNK_OVERLAP_CHARS` | `1000` | Overlap between consecutive chunks |
-| `MAX_COMPLETION_TOKENS` | `4000` | Max tokens for Mistral completion |
-| `DRY_RUN` | `false` | If `true`, print results instead of writing to MongoDB |
-
----
-
-## Usage
-
-Run the extractor with:
+Run one batch and watch progress in your terminal:
 
 ```bash
-python extractor.py
+docker compose run --rm effect-extractor
 ```
 
-### Example dry‑run
+That command prints each `exp_id` as it is processed and ends with a machine-readable `RUN_SUMMARY` JSON object. Successful results retain the existing `subjective_effect_tags` schema. Queue/version metadata is additive under `subjective_effect_extraction`.
+
+Exit codes are:
+
+- `0`: all attempted documents completed successfully.
+- `1`: one or more document-level extraction failures occurred.
+- `2`: configuration, MongoDB, index, authentication, or unexpected runtime failure.
+- `75`: temporary provider failure exhausted retries; stop and retry later.
+- `130`: interrupted.
+
+## Optional dry run
 
 ```bash
-export DRY_RUN=true
-python extractor.py
+docker compose run --rm -e DRY_RUN=true effect-extractor
 ```
 
-You’ll see JSON output for each processed document, similar to:
+## Tuning output truncation
 
-```json
-{
-  "exp_id": "12345",
-  "tags": [
-    {
-      "domain": "visual",
-      "effect": "surface breathing",
-      "parent_effect": "visual distortions",
-      "detail": null,
-      "attribution": {
-        "attribution_type": "single_substance",
-        "dose_refs": [
-          {
-            "dose_id": "d1",
-            "substance": "psilocybin mushrooms",
-            "dose": "2.5 g",
-            "route": "oral"
-          }
-        ],
-        "attribution_note": null
-      },
-      "text_detail": "walls started breathing",
-      "confidence": 0.95
-    }
-  ],
-  "notes": null
-}
+If the model returns malformed, structurally invalid, or cut-off JSON, the
+extractor automatically retries that payload in smaller overlapping chunks and
+merges the valid results. These
+environment variables tune the initial request and the retry floor:
+
+- `MAX_COMPLETION_TOKENS` controls the response token budget. Default: `12000`.
+- `MAX_TAGS_PER_PAYLOAD` caps the number of tags requested and retained per model call. Default: `40`.
+- `ZAI_THINKING` controls GLM thinking mode. Default: `disabled` for reliable JSON output.
+- `MAX_REPORT_TEXT_CHARS` controls when a report is chunked before sending. Default: `4000`.
+- `REPORT_CHUNK_SIZE_CHARS` controls chunk size for long reports. Default: `4000`.
+- `REPORT_CHUNK_OVERLAP_CHARS` controls overlap between chunks. Default: `600`.
+- `MIN_RETRY_CHUNK_SIZE_CHARS` controls the smallest automatic retry chunk when Z.ai returns invalid JSON. Default: `1200`.
+- `MAX_TEXT_DETAIL_CHARS` keeps evidence excerpts compact. Default: `180`.
+- `MAX_ATTRIBUTION_NOTE_CHARS` keeps attribution notes compact. Default: `180`.
+- `MIN_TAG_CONFIDENCE` optionally filters model confidence. Default: `0` (disabled because it is uncalibrated).
+- `REQUIRE_GROUNDED_EVIDENCE` requires every retained excerpt to map to an exact contiguous source slice. Default: `true`.
+- `ENABLE_SEMANTIC_GUARDS` rejects only narrowly detected explicit contradictions. Default: `true`.
+- `ALLOW_BROAD_FALLBACK_EFFECTS` allows generic tags such as `body load` or `visual distortions` as `effect` values when set to `true`. Default: `false`.
+
+Example:
+
+```bash
+docker compose run --rm \
+  -e MAX_COMPLETION_TOKENS=8000 \
+  -e MAX_REPORT_TEXT_CHARS=3000 \
+  -e REPORT_CHUNK_SIZE_CHARS=3000 \
+  -e MAX_TAGS_PER_PAYLOAD=10 \
+  effect-extractor
 ```
 
----
+## Retries, leases, and stale results
 
-## Output Format
+The SDK's hidden retries are disabled. The extractor owns bounded retry behavior, honors `Retry-After` within the configured cap, and classifies content filtering separately from authentication or configuration failures.
 
-The target MongoDB collection contains documents with the following structure:
+- `API_MAX_RETRIES`, `API_RETRY_BASE_SECONDS`, `API_RETRY_MAX_SECONDS`, and `API_TIMEOUT_SECONDS` control inline provider retries.
+- `ERROR_MAX_ATTEMPTS`, `ERROR_RETRY_BASE_SECONDS`, and `ERROR_RETRY_MAX_SECONDS` control per-document cooldowns. Provider outages never become permanently terminal from lifetime attempt counts.
+- `PROCESSING_LEASE_SECONDS` controls the fenced MongoDB lease and must exceed the API timeout plus maximum retry delay and a 60-second margin. Leases are renewed around every model call and retry sleep.
+- `STALE_POLICY=none|source|pipeline|any` controls deliberate re-extraction of completed results. The safe default is `none`.
+- `REPROCESS_UNVERSIONED=false` keeps legacy completed results without fingerprints untouched unless explicitly enabled.
 
-```json
-{
-  "exp_id": "12345",
-  "source_doc_id": ObjectId("..."),
-  "source_collection": "erowid",
-  "title": "My Amazing Trip Report",
-  "substance": "psilocybin mushrooms",
-  "subjective_effect_tags": [ ... ],   // array of tags as shown above
-  "subjective_effect_extraction": {
-    "model_provider": "mistral",
-    "model_name": "mistral-large-2512",
-    "notes": "Processed in 2 chunks because report_text exceeded 8000 characters.",
-    "tag_count": 12,
-    "extracted_at": "2025-04-03T12:34:56Z",
-    "status": "complete"
-  }
-}
+A stale refresh never removes the previous complete tags before replacement
+succeeds. Claim acquisition is revision-fenced; renewals, finalization, error
+writes, and releases require the matching lease token. A unique partial index
+enforces one target document per `exp_id`.
+
+## Tests
+
+Run deterministic tests against the source tree:
+
+```bash
+docker compose build
+docker compose run --rm \
+  -v "$PWD:/tests:ro" -w /tests --entrypoint python \
+  effect-extractor -m unittest discover -v
 ```
 
-On error, the document will contain a status `"error"` and an `error` field with the message.
+Queue race tests use a uniquely named disposable MongoDB collection and remove it afterward:
 
----
+```bash
+docker compose run --rm -e RUN_MONGO_INTEGRATION=1 \
+  -v "$PWD:/tests:ro" -w /tests --entrypoint python \
+  effect-extractor -m unittest -v test_queue_integration.py
+```
 
-## Controlled Vocabulary & Aliases
+## Existing-data ontology migration
 
-The system uses a **hand‑curated ontology** of subjective effects. Each effect belongs to a domain and has a canonical name and a broader parent effect (for roll‑ups).
+`migrate_existing_ontology.py` is read-only by default and never calls the
+extraction sanitizer. In normal normalization and provenance-repair modes, its
+transformations can modify only the existing `effect`, `domain`,
+`parent_effect`, `subjective_effect`, and `detail` fields on complete documents.
+Document/tag counts, `_id` order, tag keysets, evidence, attribution,
+confidence, and all non-ontology fields are verified unchanged. Explicit
+whole-collection rollback is the separate operation described below.
 
-- **Domains:** visual, auditory, somatic, motor, gastrointestinal, emotional, cognitive, temporal, selfhood, spiritual, social, tactile, sexual, thermal, sleep.
-- **Parent effects** allow hierarchical grouping (e.g., all visual distortions roll up to `visual distortions`).
+Extraction-time compatibility and stored-data migration intentionally use
+different safety thresholds. Only redirects explicitly approved as lossless
+for historical migration are rewritten. Content-dependent redirects are
+counted and reported while the stored tag remains byte-value-identical.
 
-The alias dictionary maps hundreds of common descriptive phrases to canonical tags.  
-For example:
-- `"walls rippling"` → `texture rippling`
-- `"time slowed down"` → `time dilation`
-- `"jaw clenching"` → `jaw tension`
+Run a projection first:
 
-If an extracted effect doesn’t match any canonical tag or alias, it is **rejected** and recorded in the `notes` field.
+```bash
+docker compose run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD:/workspace" -w /workspace --entrypoint python \
+  effect-extractor migrate_existing_ontology.py \
+  --manifest /workspace/migration_manifests/preapply.json
+```
 
----
+Before `--apply`, stop every extractor, take an external `mongodump`, and inspect the projection manifest. Apply creates and verifies a retained exact backup plus a transformed shadow, re-hashes the source immediately before cutover, atomically renames the shadow, and then requires an idempotent second projection:
 
-## 💊 Dose Attribution
+```bash
+docker compose run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD:/workspace" -w /workspace --entrypoint python \
+  effect-extractor migrate_existing_ontology.py --apply \
+  --manifest /workspace/migration_manifests/apply.json
+```
 
-Each effect must be attributed to one or more entries from the report’s `dose_table`. The `dose_table` is an array of objects, each containing at least a substance name and optionally dose amount/route.
+Rollback is explicit and also retains the current target before replacement:
 
-Attribution can be:
+```bash
+docker compose run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD:/workspace" -w /workspace --entrypoint python \
+  effect-extractor migrate_existing_ontology.py --apply \
+  --rollback-backup 'retained_backup_collection_name'
+```
 
-- **`single_substance`** – effect clearly belongs to one dose entry.
-- **`combination`** – effect arises from the interaction or combined experience of multiple doses (e.g., a cannabis edible + LSD).
-- **`unknown`** – dose table missing, ambiguous, or the effect cannot be confidently linked.
+Whole-collection rollback replaces the target and is appropriate only when the
+entire retained snapshot is the intended destination. Do not use it to correct
+the July ontology migration after newer documents have been written; that
+would discard those newer documents. Use the provenance-checked repair overlay
+described below instead.
 
-The model returns `dose_refs` – each referencing a `dose_id` from the original table. During validation, these references are enriched with the actual substance, dose phrase, and route from the source dose table.
+### Correcting ontology v1 without losing newer documents
 
----
+`--repair-from-backup` uses a retained pre-v1 collection only as tag-level
+provenance. It begins from the current target, so documents and indexes created
+after v1 remain intact. A tag is repairable only when the current document has
+the same `_id` and tag position and the tag is still the exact deterministic v1
+transform of its backup counterpart. Any lineage conflict fails closed, and
+the expected backup content hash is mandatory.
 
-## Chunking Logic
+Use the retained collection name and `backup_snapshot.content_sha256` from the
+local v1 apply manifest in place of the placeholders below.
 
-Long reports are split into overlapping chunks to stay within the model’s context window while preserving continuity.
+Project the overlay first without database writes:
 
-- Chunks are split on paragraph breaks, newlines, or sentence boundaries to avoid cutting in the middle of a thought.
-- Overlap (default 1000 characters) ensures that effects described near a chunk boundary are not missed.
-- After all chunks are processed, results are merged and deduplicated based on `(domain, effect, parent_effect, attribution_type, dose_ids)`.
+```bash
+docker compose run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD:/workspace" -w /workspace --entrypoint python \
+  effect-extractor migrate_existing_ontology.py \
+  --repair-from-backup 'retained_pre_v1_backup_collection' \
+  --expected-repair-backup-sha256 'verified_backup_content_sha256' \
+  --manifest /workspace/migration_manifests/repair-preapply.json
+```
 
-The final `notes` field indicates that chunking was used.
+After stopping every writer, taking a fresh external dump, and reviewing a
+conflict-free projection, apply through a verified current-target backup and
+shadow cutover:
 
----
+```bash
+docker compose run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD:/workspace" -w /workspace --entrypoint python \
+  effect-extractor migrate_existing_ontology.py --apply \
+  --repair-from-backup 'retained_pre_v1_backup_collection' \
+  --expected-repair-backup-sha256 'verified_backup_content_sha256' \
+  --manifest /workspace/migration_manifests/repair-apply.json
+```
 
-## Error Handling & Dry Run
+Apply re-hashes both source collections before cutover, verifies that only the
+five ontology fields changed, and requires an idempotent second repair
+projection. The repair is not performed automatically by normal extraction.
 
-- **Validation** rejects any tag that doesn’t conform to the controlled vocabulary, contains malformed dose references, or lacks supporting `text_detail`.
-- **Rejected tags** are summarized in the `notes` field.
-- **Dry‑run mode** (`DRY_RUN=true`) prints the final `ExtractionResult` as JSON instead of writing to MongoDB. Useful for testing and debugging.
-- **Persistence errors** are logged, and the document is marked with `status: "error"` in the target collection.
+### Historical migration record
 
----
+The local July 17, 2026 pre-apply and apply manifests record a verified
+migration of 3,681 documents and 60,824 tags. They prove count and structure
+preservation, hash-checked shadow cutover, and an idempotent second projection.
+They do not prove that every historical redirect preserved meaning, and they do
+not contain rollback data.
 
-## Incremental Processing
+The manifests contain environment-specific database identifiers, so they are
+excluded from this public repository together with the corresponding database
+dump and retained MongoDB backup. Those local artifacts remain required for
+disaster recovery. An
+`extractor_sha256` inside a manifest identifies the extractor used for that
+operation and is not expected to match later source revisions.
 
-The script processes documents in batches and remembers which ones have already been completed (status `"complete"`). It never re‑processes a finished document unless you manually reset its status.
+## Stop the container
 
-It uses a **cursor‑friendly scan** that avoids large `$nin` queries, making it suitable for large collections.
+```bash
+docker compose down
+```
 
----
+## License
 
-## 🤝 Contributing
-
-Pull requests are welcome! Please open an issue first to discuss major changes.  
-Areas for contribution:
-- Expanding the controlled vocabulary and aliases
-- Improving chunking heuristics
-- Adding support for other LLM providers
-- Better test coverage
+GNU Lesser General Public License v2.1; see [LICENSE](LICENSE).
