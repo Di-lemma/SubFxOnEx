@@ -10,8 +10,10 @@ class FakeCompletions:
     def __init__(self, contents):
         self._contents = iter(contents)
         self.payloads = []
+        self.requests = []
 
     def create(self, **kwargs):
+        self.requests.append(kwargs)
         user_content = kwargs["messages"][1]["content"]
         payload_json = user_content.split("Document:\n", 1)[1]
         self.payloads.append(json.loads(payload_json))
@@ -33,6 +35,23 @@ class FakeClient:
 
 
 class InvalidJsonRetryTests(unittest.TestCase):
+    def test_glm_53_sends_enabled_thinking_and_low_reasoning_effort(self):
+        client = FakeClient(['{"tags":[],"notes":null}'])
+        payload = {"exp_id": 1, "dose_table": [], "report_text": "test"}
+
+        with patch.dict(
+            os.environ,
+            {"ZAI_THINKING": "enabled", "ZAI_REASONING_EFFORT": "low"},
+            clear=False,
+        ):
+            extractor.extract_effects_for_payload(client, "glm-5.3", payload)
+
+        request = client.chat.completions.requests[0]
+        self.assertEqual({"type": "enabled"}, request["thinking"])
+        self.assertEqual(
+            {"reasoning_effort": "low"}, request["extra_body"]
+        )
+
     def test_response_requires_an_object_with_a_tags_array(self):
         malformed_contents = (
             "[]",

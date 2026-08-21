@@ -22,7 +22,7 @@ from zai import ZaiClient
 
 
 OUTPUT_SCHEMA_VERSION = "1"
-EXTRACTION_PIPELINE_VERSION = "2026-08-20.1"
+EXTRACTION_PIPELINE_VERSION = "2026-08-21.1"
 DEFAULT_API_MAX_RETRIES = 5
 DEFAULT_API_RETRY_BASE_SECONDS = 2.0
 DEFAULT_API_RETRY_MAX_SECONDS = 60.0
@@ -3239,7 +3239,9 @@ DEFAULT_MAX_TEXT_DETAIL_CHARS = 180
 DEFAULT_MAX_ATTRIBUTION_NOTE_CHARS = 180
 DEFAULT_MIN_RETRY_CHUNK_SIZE_CHARS = 1200
 SAFER_MAX_REPORT_TEXT_CHARS = 4000
-DEFAULT_ZAI_THINKING = "disabled"
+DEFAULT_ZAI_MODEL = "glm-5.3"
+DEFAULT_ZAI_THINKING = "enabled"
+DEFAULT_ZAI_REASONING_EFFORT = "low"
 
 
 class InvalidModelJSONError(ValueError):
@@ -3490,6 +3492,31 @@ def build_thinking_config() -> dict:
     return {"type": thinking_type}
 
 
+def build_reasoning_effort() -> Optional[str]:
+    raw_value = os.getenv("ZAI_REASONING_EFFORT", DEFAULT_ZAI_REASONING_EFFORT)
+    reasoning_effort = raw_value.strip().lower()
+    if not reasoning_effort:
+        return None
+    if reasoning_effort not in {"low", "high", "max"}:
+        raise ValueError(
+            "ZAI_REASONING_EFFORT must be one of 'low', 'high', or 'max'"
+        )
+    return reasoning_effort
+
+
+def build_model_reasoning_config(model: str) -> tuple[dict, Optional[str]]:
+    thinking = build_thinking_config()
+    reasoning_effort = build_reasoning_effort()
+    if model.strip().lower() == "glm-5.3":
+        if thinking["type"] != "enabled":
+            raise ValueError("ZAI_THINKING must be 'enabled' for glm-5.3")
+        if reasoning_effort is None:
+            raise ValueError(
+                "ZAI_REASONING_EFFORT must be set to low, high, or max for glm-5.3"
+            )
+    return thinking, reasoning_effort
+
+
 def normalize_raw_effect_label(value: Optional[str]) -> Optional[str]:
     if not isinstance(value, str):
         return None
@@ -3565,9 +3592,11 @@ def build_run_fingerprint(model: str) -> dict:
         minimum=40,
     )
     include_broad_fallbacks = env_bool("ALLOW_BROAD_FALLBACK_EFFECTS", False)
+    thinking, reasoning_effort = build_model_reasoning_config(model)
     settings = {
         "model": model,
-        "thinking": os.getenv("ZAI_THINKING", DEFAULT_ZAI_THINKING).strip().lower(),
+        "thinking": thinking["type"],
+        "reasoning_effort": reasoning_effort,
         "max_completion_tokens": env_int(
             "MAX_COMPLETION_TOKENS", DEFAULT_MAX_COMPLETION_TOKENS, minimum=1
         ),
@@ -4562,11 +4591,10 @@ def extract_effects_for_payload(
         minimum=40,
     )
 
-    response = call_zai_with_retry(
-        client,
-        lease_heartbeat=lease_heartbeat,
-        model=model,
-        messages=[
+    thinking, reasoning_effort = build_model_reasoning_config(model)
+    request_kwargs = {
+        "model": model,
+        "messages": [
             {
                 "role": "system",
                 "content": build_system_prompt(
@@ -4585,10 +4613,20 @@ def extract_effects_for_payload(
                 ),
             },
         ],
-        temperature=0,
-        max_tokens=max_completion_tokens,
-        response_format=build_response_format(),
-        thinking=build_thinking_config(),
+        "temperature": 0,
+        "max_tokens": max_completion_tokens,
+        "response_format": build_response_format(),
+        "thinking": thinking,
+    }
+    if reasoning_effort is not None:
+        # zai-sdk 0.2.2 predates the named reasoning_effort argument but
+        # deliberately supports forward-compatible request fields here.
+        request_kwargs["extra_body"] = {"reasoning_effort": reasoning_effort}
+
+    response = call_zai_with_retry(
+        client,
+        lease_heartbeat=lease_heartbeat,
+        **request_kwargs,
     )
 
     raw_result = extract_response_json(response)
@@ -5398,7 +5436,7 @@ def load_pending_batch(
 
 def run_extraction():
     zai_api_key = os.environ["ZAI_API_KEY"]
-    zai_model = os.getenv("ZAI_MODEL", "glm-5.2")
+    zai_model = os.getenv("ZAI_MODEL", DEFAULT_ZAI_MODEL)
     mongo_uri = os.getenv("MONGO_URI", "mongodb://host.docker.internal:27017")
     mongo_db = os.getenv("MONGO_DB", "tripindex")
     mongo_source_collection = os.getenv("MONGO_SOURCE_COLLECTION", "erowid-clean")

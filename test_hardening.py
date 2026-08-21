@@ -503,6 +503,29 @@ class MergeAndRetryTests(unittest.TestCase):
 
 
 class EnvironmentValidationTests(unittest.TestCase):
+    def test_glm_53_reasoning_configuration_is_explicit_and_fail_closed(self):
+        with patch.dict(
+            os.environ,
+            {"ZAI_THINKING": "enabled", "ZAI_REASONING_EFFORT": "low"},
+            clear=False,
+        ):
+            self.assertEqual(
+                ({"type": "enabled"}, "low"),
+                extractor.build_model_reasoning_config("glm-5.3"),
+            )
+
+        invalid_values = (
+            {"ZAI_THINKING": "disabled", "ZAI_REASONING_EFFORT": "low"},
+            {"ZAI_THINKING": "enabled", "ZAI_REASONING_EFFORT": "medium"},
+            {"ZAI_THINKING": "enabled", "ZAI_REASONING_EFFORT": ""},
+        )
+        for values in invalid_values:
+            with self.subTest(values=values), patch.dict(
+                os.environ, values, clear=False
+            ):
+                with self.assertRaises(ValueError):
+                    extractor.build_model_reasoning_config("glm-5.3")
+
     def test_boolean_environment_values_are_explicit_and_fail_closed(self):
         truthy = ("1", "true", "YES", "On")
         falsy = ("0", "false", "NO", "off")

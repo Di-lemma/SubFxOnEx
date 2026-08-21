@@ -7,8 +7,9 @@ services:
     working_dir: /app
     environment:
       ZAI_API_KEY: ${ZAI_API_KEY:-}
-      ZAI_MODEL: ${ZAI_MODEL:-glm-5.2}
-      ZAI_THINKING: ${ZAI_THINKING:-disabled}
+      ZAI_MODEL: ${ZAI_MODEL:-glm-5.3}
+      ZAI_THINKING: ${ZAI_THINKING:-enabled}
+      ZAI_REASONING_EFFORT: ${ZAI_REASONING_EFFORT:-low}
       MONGO_URI: ${MONGO_URI:-mongodb://host.docker.internal:27017}
       MONGO_DB: ${MONGO_DB:-tripindex}
       MONGO_SOURCE_COLLECTION: ${MONGO_SOURCE_COLLECTION:-erowid-clean}

@@ -63,7 +63,10 @@ carry IDs forward.
 
 1. Create a private environment file with
    `install -m 600 .env.example .env`.
-2. Fill in `ZAI_API_KEY` and adjust the Mongo settings if needed. By default the extractor reads from `tripindex.erowid-clean` and writes extracted effects to `tripindex.erowid-effects-1`.
+2. Fill in `ZAI_API_KEY` and adjust the Mongo settings if needed. The default
+   model is `glm-5.3` at low reasoning effort. By default the extractor reads
+   from `tripindex.erowid-clean` and writes extracted effects to
+   `tripindex.erowid-effects-1`.
 3. Build the image:
 
 ```bash
@@ -107,7 +110,10 @@ environment variables tune the initial request and the retry floor:
 
 - `MAX_COMPLETION_TOKENS` controls the response token budget. Default: `12000`.
 - `MAX_TAGS_PER_PAYLOAD` caps the number of tags requested and retained per model call. Default: `40`.
-- `ZAI_THINKING` controls GLM thinking mode. Default: `disabled` for reliable JSON output.
+- `ZAI_THINKING` controls GLM thinking mode. Default: `enabled`; GLM-5.3 does
+  not support disabling it.
+- `ZAI_REASONING_EFFORT` selects `low`, `high`, or `max`. Default: `low` to
+  limit latency and cost while retaining GLM-5.3 compatibility.
 - `MAX_REPORT_TEXT_CHARS` controls when a report is chunked before sending. Default: `4000`.
 - `REPORT_CHUNK_SIZE_CHARS` controls chunk size for long reports. Default: `4000`.
 - `REPORT_CHUNK_OVERLAP_CHARS` controls overlap between chunks. Default: `600`.
