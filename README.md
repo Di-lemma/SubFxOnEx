@@ -24,6 +24,41 @@ compatibility details, and the ambiguous-alias blocklist. Changes to any of
 those normalization semantics therefore change the pipeline fingerprint used
 by the stale-result policy.
 
+## Machine-readable ontology release
+
+The current ontology is also published as a self-validating, content-addressed
+JSON file under [`ontology_releases/`](ontology_releases/). Every concept has a
+stable UUIDv5 identifier, explicit domain/kind/parent fields, and a deterministic
+position. Aliases point to concept IDs; safe deprecated labels have
+`resolution: "automatic"`, while unsafe redirects are retained only as
+`resolution: "manual_review"` and never inherit concept identity.
+
+`ontology_hash` ties a release to the extractor's complete normalization
+semantics. `release_hash` covers the canonical JSON release body itself and is
+also part of the filename. Exactly one schema-v1 release may represent a given
+`ontology_hash`.
+
+Verify the checked-in release without writing:
+
+```bash
+docker compose run --rm --no-deps \
+  -v "$PWD:/workspace:ro" -w /workspace --entrypoint python \
+  effect-extractor export_ontology.py --check
+```
+
+After an intentional ontology change, generate the next immutable release with
+a writable source mount, then review and commit the new file:
+
+```bash
+docker compose run --rm --no-deps --user "$(id -u):$(id -g)" \
+  -v "$PWD:/workspace" -w /workspace --entrypoint python \
+  effect-extractor export_ontology.py --write
+```
+
+Committed release files are stable-ID history. Do not edit or replace them.
+The exporter verifies their content hashes and filenames before using them to
+carry IDs forward.
+
 ## Setup
 
 1. Create a private environment file with

@@ -104,6 +104,34 @@ Ambiguous shorthand such as `happy`, `detached`, or `thought i was dead` is
 intentionally not coerced into one canonical effect; it is rejected so the
 evidence can be decomposed correctly.
 
+## Machine-readable releases
+
+`export_ontology.py` publishes the embedded ontology as immutable,
+content-addressed JSON under `ontology_releases/`. `ontology_hash` fingerprints
+the extractor's normalization semantics; `release_hash` fingerprints the
+exported schema body. Concept UUIDv5 IDs remain stable across releases by
+reading verified prior artifacts.
+
+The exported `normalized_name` and `normalized_label` values are Unicode search
+keys, not permission to resolve an ambiguous phrase. Automatic aliases and
+safe redirects remain distinct from `manual_review` redirects and the explicit
+ambiguous-label list.
+
+For a canonical rename:
+
+1. Ensure the prior ontology release is already published and immutable.
+2. Rename the canonical concept and add the old label to
+   `SAFE_DEPRECATED_EFFECT_REDIRECTS` only when the replacement is semantically
+   entailed.
+3. Export the new release and verify that the renamed concept inherited its
+   prior ID.
+
+Unsafe redirects never transfer stable identity. If label normalization or the
+release structure changes, increment the export schema version; do not create
+two releases with different bodies for the same schema and `ontology_hash`.
+Any schema-version change must also teach the prior-release reader how to carry
+concept IDs forward from the older schema.
+
 ## Review checklist
 
 When adding or renaming a term:
