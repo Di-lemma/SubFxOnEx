@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r /app/requirements.txt
 
 COPY --chown=extractor:extractor effect_extractor.py /app/effect_extractor.py
+COPY --chown=extractor:extractor effect_ontology /app/effect_ontology
 
 USER extractor
 

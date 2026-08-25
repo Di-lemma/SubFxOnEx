@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export the embedded subjective-effect ontology as an immutable release."""
+"""Export the modular subjective-effect ontology as an immutable release."""
 
 from __future__ import annotations
 
@@ -17,7 +17,8 @@ from uuid import UUID, uuid4, uuid5
 import effect_extractor as extractor
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+SUPPORTED_SCHEMA_VERSIONS = frozenset({1, SCHEMA_VERSION})
 ONTOLOGY_NAME = "erowid-subjective-effects"
 ONTOLOGY_NAMESPACE = UUID("2f0d5b0c-8ee5-5c33-bbcb-850e1461c63e")
 RELEASE_PREFIX = "subjective-effects-"
@@ -33,7 +34,7 @@ RELEASE_BODY_KEYS = {
     "counts",
 }
 RELEASE_KEYS = RELEASE_BODY_KEYS | {"release_hash"}
-CONCEPT_KEYS = {
+LEGACY_CONCEPT_KEYS = {
     "id",
     "name",
     "normalized_name",
@@ -44,6 +45,7 @@ CONCEPT_KEYS = {
     "parent_name",
     "position",
 }
+CONCEPT_KEYS = LEGACY_CONCEPT_KEYS | {"definition"}
 ALIAS_KEYS = {
     "label",
     "normalized_label",
@@ -112,13 +114,14 @@ def read_previous_concept_ids(release_directory: Path) -> dict[str, str]:
     """Read immutable prior releases as the stable-ID history."""
 
     concept_ids: dict[str, str] = {}
-    release_hashes_by_ontology: dict[str, str] = {}
+    release_hashes_by_schema_and_ontology: dict[tuple[int, str], str] = {}
     for path in sorted(release_directory.glob(f"{RELEASE_PREFIX}*.json")):
         try:
             release = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise ValueError(f"Cannot read prior ontology release {path}: {exc}") from exc
-        if release.get("schema_version") != SCHEMA_VERSION:
+        schema_version = release.get("schema_version")
+        if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
             raise ValueError(
                 f"Unsupported prior ontology release schema in {path}: "
                 f"{release.get('schema_version')!r}"
@@ -138,17 +141,22 @@ def read_previous_concept_ids(release_directory: Path) -> dict[str, str]:
                 f"Prior ontology release filename does not match its hash: {path}"
             )
         ontology_hash = release["ontology_hash"]
-        existing_release_hash = release_hashes_by_ontology.get(ontology_hash)
+        release_identity = (schema_version, ontology_hash)
+        existing_release_hash = release_hashes_by_schema_and_ontology.get(
+            release_identity
+        )
         if (
             existing_release_hash is not None
             and existing_release_hash != release["release_hash"]
         ):
             raise ValueError(
-                "Competing schema-v1 releases exist for ontology hash "
+                f"Competing schema-v{schema_version} releases exist for ontology hash "
                 f"{ontology_hash}: {existing_release_hash} and "
                 f"{release['release_hash']}"
             )
-        release_hashes_by_ontology[ontology_hash] = release["release_hash"]
+        release_hashes_by_schema_and_ontology[release_identity] = release[
+            "release_hash"
+        ]
         for concept in release.get("concepts", []):
             name = normalize_label(str(concept.get("name", "")))
             concept_id = str(concept.get("id", ""))
@@ -229,6 +237,7 @@ def build_release(previous_ids: dict[str, str] | None = None) -> dict[str, Any]:
                 "normalized_name": normalize_label(effect),
                 "slug": slugify(effect),
                 "domain": domain,
+                "definition": extractor.EFFECT_DEFINITIONS[effect],
                 "kind": "rollup" if is_rollup else "atomic",
                 "parent_id": None if is_rollup else concept_ids[parent_effect],
                 "parent_name": None if is_rollup else parent_effect,
@@ -314,9 +323,15 @@ def validate_release(
     body = {key: release[key] for key in RELEASE_BODY_KEYS}
     if release_hash != stable_hash(body):
         raise ValueError("Ontology release hash does not match its canonical content")
-    if release.get("schema_version") != SCHEMA_VERSION:
+    schema_version = release.get("schema_version")
+    if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
         raise ValueError(
             f"Unsupported ontology release schema: {release.get('schema_version')!r}"
+        )
+    if require_current_alignment and schema_version != SCHEMA_VERSION:
+        raise ValueError(
+            f"Ontology release schema {schema_version!r} is not the current schema "
+            f"{SCHEMA_VERSION!r}"
         )
     if release.get("ontology") != ONTOLOGY_NAME:
         raise ValueError(f"Unexpected ontology name: {release.get('ontology')!r}")
@@ -334,8 +349,11 @@ def validate_release(
     concepts_by_id: dict[str, dict[str, Any]] = {}
     normalized_names: set[str] = set()
     slugs: set[str] = set()
+    required_concept_keys = (
+        CONCEPT_KEYS if schema_version == SCHEMA_VERSION else LEGACY_CONCEPT_KEYS
+    )
     for position, concept in enumerate(concepts):
-        if not isinstance(concept, dict) or set(concept) != CONCEPT_KEYS:
+        if not isinstance(concept, dict) or set(concept) != required_concept_keys:
             raise ValueError(f"Concept at position {position} has an invalid shape")
         concept_id = concept.get("id")
         try:
@@ -358,6 +376,17 @@ def validate_release(
             raise ValueError(f"Concept {name!r} has a stale slug")
         if normalized_name in normalized_names or slug in slugs:
             raise ValueError("Ontology release concept names and slugs must be unique")
+        if schema_version == SCHEMA_VERSION:
+            definition = concept.get("definition")
+            if (
+                not isinstance(definition, str)
+                or not definition
+                or definition != definition.strip()
+                or "\n" in definition
+                or len(re.findall(r"\b[\w’-]+\b", definition)) < 12
+                or definition[-1:] not in {".", "?", "!"}
+            ):
+                raise ValueError(f"Concept {name!r} has an invalid definition")
         if concept.get("kind") not in {"atomic", "rollup"}:
             raise ValueError(f"Invalid concept kind for {name!r}: {concept.get('kind')!r}")
         if concept.get("position") != position:
@@ -503,6 +532,11 @@ def validate_release(
     }
     if actual_concepts != expected_concepts:
         raise ValueError("Ontology release concepts do not match the current hierarchy")
+    actual_definitions = {
+        concept["name"]: concept["definition"] for concept in concepts
+    }
+    if actual_definitions != extractor.EFFECT_DEFINITIONS:
+        raise ValueError("Ontology release definitions do not match the current catalog")
     expected_aliases = {
         alias: (
             target,

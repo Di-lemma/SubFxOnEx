@@ -153,7 +153,7 @@ class OntologyExportTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with self.assertRaisesRegex(ValueError, "Competing schema-v1 releases"):
+            with self.assertRaisesRegex(ValueError, "Competing schema-v2 releases"):
                 ontology_export.read_previous_concept_ids(release_directory)
 
     def test_prior_release_schema_and_ontology_tampering_fail_closed(self):

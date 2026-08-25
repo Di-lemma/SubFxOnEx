@@ -2,3 +2,5 @@
 !Dockerfile
 !requirements.txt
 !effect_extractor.py
+!effect_ontology/
+!effect_ontology/**

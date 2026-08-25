@@ -19,6 +19,13 @@ behind closed eyes” is detail. `salience enhancement` is canonical while
 “mortality felt unusually important” places mortality in detail. `synesthesia`
 is canonical while auditory-to-visual is a modality-pair detail.
 
+Canonical hierarchy and ordering live in `effect_ontology/effects.py`, with labels
+and definitions under `effect_ontology/definitions/`, which ontology tools can use
+without importing MongoDB, Pydantic, or the model client.
+
+The catalog validator requires exact definition coverage, rejects terse, malformed,
+and duplicate prose, so every canonical node, including rollups, stays documented.
+
 Severity and course words such as mild, intense, transient, or persistent must
 never be baked into canonical labels. The runtime validator rejects those forms,
 slash-joined alternatives, `-like` qualifiers, alias targets that do not exist,
@@ -106,11 +113,15 @@ evidence can be decomposed correctly.
 
 ## Machine-readable releases
 
-`export_ontology.py` publishes the embedded ontology as immutable,
+`export_ontology.py` publishes the modular ontology as immutable,
 content-addressed JSON under `ontology_releases/`. `ontology_hash` fingerprints
 the extractor's normalization semantics; `release_hash` fingerprints the
 exported schema body. Concept UUIDv5 IDs remain stable across releases by
 reading verified prior artifacts.
+
+Schema v2 publishes the elaborate definition on every concept record;
+immutable schema v1 artifacts remain valid stable-ID history and are verified
+by the same reader.
 
 The exported `normalized_name` and `normalized_label` values are Unicode search
 keys, not permission to resolve an ambiguous phrase. Automatic aliases and
@@ -138,8 +149,9 @@ When adding or renaming a term:
 
 1. Search canonical labels, aliases, boundary notes, and redirects.
 2. Compare it with every nearest neighbor, including terms in other domains.
-3. Add concise positive and differential definitions to
-   `ONTOLOGY_BOUNDARY_RULES`.
+3. Add an elaborate positive and differential definition in the relevant
+   `effect_ontology/definitions/` module; add a prompt boundary rule when
+   the extractor must distinguish the concept from a confusable neighbor.
 4. Add only unambiguous aliases; do not map distinct emotions or symptoms merely
    because everyday speech sometimes conflates them.
 5. Put contextual variants in `detail`.

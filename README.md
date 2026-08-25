@@ -10,8 +10,14 @@ Broad rollup labels such as `visual distortions` or `body load` are fallback-onl
 By default, broad rollup labels are no longer accepted as `effect` values at all; they are kept only in `parent_effect` for rollups.
 Validation may append notes about rejected unsupported tag proposals so ontology gaps are visible during review. The Mongo tag schema is unchanged: ontology hierarchy, source dose metadata, exact evidence grounding, and attribution type are reconstructed deterministically before persistence.
 
-The embedded vocabulary spans 21 domains and 506 ontology nodes: 485 atomic
+The modular catalog spans 21 domains and 506 ontology nodes: 485 atomic
 effects and 21 broad parent rollups.
+
+Canonical labels and hierarchy live in `effect_ontology/effects.py`; prose
+definitions are grouped by phenomenological area under
+`effect_ontology/definitions/`. Import `effect_ontology` for the data-only API,
+including `EFFECT_DEFINITIONS`, `get_effect_definition()`, and typed
+`iter_effect_concepts()` records, without importing the extractor runtime.
 
 The extractor does not treat model output as ground truth. It rejects invented ontology labels, non-contiguous or ungrounded evidence, ambiguous dose IDs, malformed dose references, broad fallback labels, and a small set of explicit polarity contradictions. `MIN_TAG_CONFIDENCE` defaults to `0` because model self-confidence is not calibrated without a labelled evaluation set; it remains available as an opt-in filter.
 
@@ -28,15 +34,19 @@ by the stale-result policy.
 
 The current ontology is also published as a self-validating, content-addressed
 JSON file under [`ontology_releases/`](ontology_releases/). Every concept has a
-stable UUIDv5 identifier, explicit domain/kind/parent fields, and a deterministic
-position. Aliases point to concept IDs; safe deprecated labels have
-`resolution: "automatic"`, while unsafe redirects are retained only as
-`resolution: "manual_review"` and never inherit concept identity.
+stable UUIDv5 identifier, an elaborate prose definition, explicit
+domain/kind/parent fields, and a deterministic position. Aliases point to
+concept IDs; safe deprecated labels have `resolution: "automatic"`, while
+unsafe redirects are retained only as `resolution: "manual_review"` and never
+inherit concept identity.
 
 `ontology_hash` ties a release to the extractor's complete normalization
 semantics. `release_hash` covers the canonical JSON release body itself and is
-also part of the filename. Exactly one schema-v1 release may represent a given
-`ontology_hash`.
+also part of the filename. Exactly one release per schema version may
+represent a given `ontology_hash`.
+
+Schema v1 artifacts remain immutable stable-ID history and are still validated.
+Schema v2 embeds each concept definition in the release.
 
 Verify the checked-in release without writing:
 
