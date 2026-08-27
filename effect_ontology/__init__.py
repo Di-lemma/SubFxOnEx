@@ -13,6 +13,19 @@ from typing import Iterator
 
 from .definitions import EFFECT_DEFINITIONS
 from .effects import CONTROLLED_EFFECT_ONTOLOGY
+from .release import (
+    CURRENT_MANIFEST_FILENAME,
+    CURRENT_SCHEMA_VERSION,
+    DEFAULT_REVIEW_STATUS,
+    LabelResolution,
+    NORMALIZATION_PROFILE,
+    OntologyResolver,
+    REVIEW_STATUSES,
+    load_pinned_release,
+    load_release,
+    resolve_label,
+    validate_consumer_release,
+)
 
 
 @dataclass(frozen=True)
@@ -102,9 +115,20 @@ validate_effect_catalog()
 
 __all__ = [
     "CONTROLLED_EFFECT_ONTOLOGY",
+    "CURRENT_MANIFEST_FILENAME",
+    "CURRENT_SCHEMA_VERSION",
+    "DEFAULT_REVIEW_STATUS",
     "EFFECT_DEFINITIONS",
     "EffectConcept",
+    "LabelResolution",
+    "NORMALIZATION_PROFILE",
+    "OntologyResolver",
+    "REVIEW_STATUSES",
     "get_effect_definition",
     "iter_effect_concepts",
+    "load_pinned_release",
+    "load_release",
+    "resolve_label",
+    "validate_consumer_release",
     "validate_effect_catalog",
 ]

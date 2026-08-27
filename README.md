@@ -17,36 +17,68 @@ Canonical labels and hierarchy live in `effect_ontology/effects.py`; prose
 definitions are grouped by phenomenological area under
 `effect_ontology/definitions/`. Import `effect_ontology` for the data-only API,
 including `EFFECT_DEFINITIONS`, `get_effect_definition()`, and typed
-`iter_effect_concepts()` records, without importing the extractor runtime.
+`iter_effect_concepts()` records, without importing the extractor runtime. The
+same standard-library-only package loads and verifies the pinned release with
+`load_pinned_release()` and resolves labels through the fail-closed
+`OntologyResolver`.
 
 The extractor does not treat model output as ground truth. It rejects invented ontology labels, non-contiguous or ungrounded evidence, ambiguous dose IDs, malformed dose references, broad fallback labels, and a small set of explicit polarity contradictions. `MIN_TAG_CONFIDENCE` defaults to `0` because model self-confidence is not calibrated without a labelled evaluation set; it remains available as an opt-in filter.
 
 See [ONTOLOGY.md](ONTOLOGY.md) for the atomicity rules, independent research
 provenance, compatibility policy, and term-admission checklist.
 
-Ontology identity is deterministic. `ONTOLOGY_HASH` covers the canonical
-hierarchy, the final resolved alias map, safe and unsafe deprecated redirects,
-compatibility details, and the ambiguous-alias blocklist. Changes to any of
-those normalization semantics therefore change the pipeline fingerprint used
-by the stale-result policy.
+Extractor pipeline identity remains deterministic: its legacy `ONTOLOGY_HASH`
+covers the hierarchy and normalization tables used while extracting. Published
+schema-v3 release identity is split more precisely below so definition-only
+changes do not pretend that label normalization changed.
 
 ## Machine-readable ontology release
 
 The current ontology is also published as a self-validating, content-addressed
 JSON file under [`ontology_releases/`](ontology_releases/). Every concept has a
 stable UUIDv5 identifier, an elaborate prose definition, explicit
-domain/kind/parent fields, and a deterministic position. Aliases point to
+domain/kind/parent fields, a deterministic position, and a controlled
+`review_status`. Aliases point to
 concept IDs; safe deprecated labels have `resolution: "automatic"`, while
-unsafe redirects are retained only as `resolution: "manual_review"` and never
-inherit concept identity.
+unsafe redirects have `resolution: "manual_review"`. A manual record exposes
+only `candidate_effect_id`/`candidate_effect_name`; the resolver returns those
+as editorial context while leaving canonical identity unset.
 
-`ontology_hash` ties a release to the extractor's complete normalization
-semantics. `release_hash` covers the canonical JSON release body itself and is
-also part of the filename. Exactly one release per schema version may
-represent a given `ontology_hash`.
+Schema v3 distinguishes three identities:
+
+- `normalization_hash` covers the declared normalization profile, canonical
+  labels and slugs, aliases, redirects and their resolution modes, and ambiguous
+  labels.
+- `semantic_hash` covers concepts, UUIDs, definitions, domains, rollups,
+  redirect relationships, and review metadata.
+- `release_hash` covers the complete canonical JSON body except the self-hash
+  field and is part of the immutable filename.
+
+[`ontology_releases/current.json`](ontology_releases/current.json) is the sole
+stable pin for the current artifact. It repeats all three release identities
+and includes `artifact_sha256` for the exact serialized file. Consumers must
+load this explicit pin or an explicitly configured manifest; they must not scan
+the directory for a newest-looking filename.
 
 Schema v1 artifacts remain immutable stable-ID history and are still validated.
-Schema v2 embeds each concept definition in the release.
+Schema v2 added definitions. Schema v3 adds split identity, truthful review
+status, safe manual-candidate fields, and the pinned manifest without modifying
+either earlier artifact.
+
+All current concepts use `review_status: "defined"`. Here `defined` means only
+that a nonempty definition is present and structurally validated. It does not
+claim editorial review, expert review, or clinical validation.
+
+Load and resolve the pinned data without extractor dependencies:
+
+```python
+from effect_ontology import OntologyResolver, load_pinned_release
+
+release = load_pinned_release()
+result = OntologyResolver(release).resolve_label("agency disturbance")
+assert result.mode == "manual_review"
+assert result.concept_id is None
+```
 
 Verify the checked-in release without writing:
 
@@ -57,7 +89,8 @@ docker compose run --rm --no-deps \
 ```
 
 After an intentional ontology change, generate the next immutable release with
-a writable source mount, then review and commit the new file:
+a writable source mount, then review and commit the new file and updated
+`current.json` pin:
 
 ```bash
 docker compose run --rm --no-deps --user "$(id -u):$(id -g)" \
@@ -67,7 +100,8 @@ docker compose run --rm --no-deps --user "$(id -u):$(id -g)" \
 
 Committed release files are stable-ID history. Do not edit or replace them.
 The exporter verifies their content hashes and filenames before using them to
-carry IDs forward.
+carry IDs forward. `--check` also verifies that `current.json` deterministically
+pins the exact current artifact and raw-file SHA-256.
 
 ## Setup
 

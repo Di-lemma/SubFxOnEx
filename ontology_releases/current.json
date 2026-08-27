@@ -1,0 +1,9 @@
+{
+  "artifact": "subjective-effects-a6c48eee78d163113b37585e6cbaf2974ccf55953dbef902817503f2d732ea72.json",
+  "artifact_sha256": "041a729ee568b9f7533129710b986853e8391318e972465c97f3c37f88b90cca",
+  "normalization_hash": "dbdf65c1060618abf39a111fcd549c31e484b373808fa2c1c0d834e7800558ac",
+  "ontology": "erowid-subjective-effects",
+  "release_hash": "a6c48eee78d163113b37585e6cbaf2974ccf55953dbef902817503f2d732ea72",
+  "schema_version": 3,
+  "semantic_hash": "c5ee4ecfc3dc4deff5dfc62956d3e19fa6fe027933e5f0597454f055c154a942"
+}

@@ -8,21 +8,41 @@ import json
 import os
 import re
 import sys
-import unicodedata
-from hashlib import sha256
 from pathlib import Path
 from typing import Any, Iterable
 from uuid import UUID, uuid4, uuid5
 
 import effect_extractor as extractor
+from effect_ontology.release import (
+    CURRENT_MANIFEST_FILENAME,
+    CURRENT_SCHEMA_VERSION,
+    DEFAULT_REVIEW_STATUS,
+    NORMALIZATION_PROFILE,
+    ONTOLOGY_NAME,
+    ONTOLOGY_NAMESPACE,
+    RELEASE_PREFIX,
+    V3_ALIAS_KEYS,
+    V3_CONCEPT_KEYS,
+    V3_COUNT_KEYS,
+    V3_REDIRECT_KEYS,
+    V3_RELEASE_BODY_KEYS,
+    V3_RELEASE_KEYS,
+    build_release_manifest,
+    canonical_json,
+    compute_normalization_hash,
+    compute_release_hash,
+    compute_semantic_hash,
+    normalize_label,
+    slugify,
+    stable_hash,
+    validate_consumer_release,
+    validate_release_manifest,
+)
 
 
-SCHEMA_VERSION = 2
-SUPPORTED_SCHEMA_VERSIONS = frozenset({1, SCHEMA_VERSION})
-ONTOLOGY_NAME = "erowid-subjective-effects"
-ONTOLOGY_NAMESPACE = UUID("2f0d5b0c-8ee5-5c33-bbcb-850e1461c63e")
-RELEASE_PREFIX = "subjective-effects-"
-RELEASE_BODY_KEYS = {
+SCHEMA_VERSION = CURRENT_SCHEMA_VERSION
+SUPPORTED_SCHEMA_VERSIONS = frozenset({1, 2, SCHEMA_VERSION})
+LEGACY_RELEASE_BODY_KEYS = {
     "schema_version",
     "ontology",
     "ontology_hash",
@@ -33,7 +53,9 @@ RELEASE_BODY_KEYS = {
     "ambiguous_labels",
     "counts",
 }
-RELEASE_KEYS = RELEASE_BODY_KEYS | {"release_hash"}
+LEGACY_RELEASE_KEYS = LEGACY_RELEASE_BODY_KEYS | {"release_hash"}
+RELEASE_BODY_KEYS = V3_RELEASE_BODY_KEYS
+RELEASE_KEYS = V3_RELEASE_KEYS
 LEGACY_CONCEPT_KEYS = {
     "id",
     "name",
@@ -45,76 +67,19 @@ LEGACY_CONCEPT_KEYS = {
     "parent_name",
     "position",
 }
-CONCEPT_KEYS = LEGACY_CONCEPT_KEYS | {"definition"}
-ALIAS_KEYS = {
-    "label",
-    "normalized_label",
-    "effect_id",
-    "effect_name",
-    "detail",
-}
-REDIRECT_KEYS = ALIAS_KEYS | {"resolution"}
-COUNT_KEYS = {
-    "concepts",
-    "atomic_concepts",
-    "rollup_concepts",
-    "aliases",
-    "redirects",
-    "ambiguous_labels",
-}
-
-
-def canonical_json(value: Any) -> str:
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-
-
-def stable_hash(value: Any) -> str:
-    return sha256(canonical_json(value).encode("utf-8")).hexdigest()
-
-
-def normalize_label(value: str) -> str:
-    normalized = unicodedata.normalize("NFKD", value)
-    normalized = "".join(
-        character for character in normalized if not unicodedata.combining(character)
-    )
-    normalized = (
-        normalized.replace("‐", "-")
-        .replace("‑", "-")
-        .replace("‒", "-")
-        .replace("–", "-")
-        .replace("—", "-")
-        .replace("―", "-")
-        .replace("−", "-")
-        .replace("α", "alpha")
-        .replace("β", "beta")
-        .replace("Δ", "delta")
-    )
-    return " ".join(normalized.strip().lower().replace("_", " ").split())
-
-
-def slugify(value: str) -> str:
-    normalized = unicodedata.normalize("NFKD", value)
-    normalized = "".join(
-        character for character in normalized if not unicodedata.combining(character)
-    )
-    normalized = (
-        normalized.replace("α", "alpha")
-        .replace("β", "beta")
-        .replace("Δ", "delta")
-    )
-    return re.sub(r"(^-|-$)", "", re.sub(r"[^a-z0-9]+", "-", normalized.lower()))
+V2_CONCEPT_KEYS = LEGACY_CONCEPT_KEYS | {"definition"}
+CONCEPT_KEYS = V3_CONCEPT_KEYS
+ALIAS_KEYS = V3_ALIAS_KEYS
+LEGACY_REDIRECT_KEYS = ALIAS_KEYS | {"resolution"}
+REDIRECT_KEYS = V3_REDIRECT_KEYS
+COUNT_KEYS = V3_COUNT_KEYS
 
 
 def read_previous_concept_ids(release_directory: Path) -> dict[str, str]:
     """Read immutable prior releases as the stable-ID history."""
 
     concept_ids: dict[str, str] = {}
-    release_hashes_by_schema_and_ontology: dict[tuple[int, str], str] = {}
+    release_hashes_by_identity: dict[tuple[Any, ...], str] = {}
     for path in sorted(release_directory.glob(f"{RELEASE_PREFIX}*.json")):
         try:
             release = json.loads(path.read_text(encoding="utf-8"))
@@ -140,23 +105,29 @@ def read_previous_concept_ids(release_directory: Path) -> dict[str, str]:
             raise ValueError(
                 f"Prior ontology release filename does not match its hash: {path}"
             )
-        ontology_hash = release["ontology_hash"]
-        release_identity = (schema_version, ontology_hash)
-        existing_release_hash = release_hashes_by_schema_and_ontology.get(
-            release_identity
-        )
+        if schema_version in {1, 2}:
+            release_identity = (
+                schema_version,
+                "ontology_hash",
+                release["ontology_hash"],
+            )
+        else:
+            release_identity = (
+                schema_version,
+                release["normalization_hash"],
+                release["semantic_hash"],
+            )
+        existing_release_hash = release_hashes_by_identity.get(release_identity)
         if (
             existing_release_hash is not None
             and existing_release_hash != release["release_hash"]
         ):
             raise ValueError(
-                f"Competing schema-v{schema_version} releases exist for ontology hash "
-                f"{ontology_hash}: {existing_release_hash} and "
+                f"Competing schema-v{schema_version} releases exist for identity "
+                f"{release_identity[1:]!r}: {existing_release_hash} and "
                 f"{release['release_hash']}"
             )
-        release_hashes_by_schema_and_ontology[release_identity] = release[
-            "release_hash"
-        ]
+        release_hashes_by_identity[release_identity] = release["release_hash"]
         for concept in release.get("concepts", []):
             name = normalize_label(str(concept.get("name", "")))
             concept_id = str(concept.get("id", ""))
@@ -242,6 +213,7 @@ def build_release(previous_ids: dict[str, str] | None = None) -> dict[str, Any]:
                 "parent_id": None if is_rollup else concept_ids[parent_effect],
                 "parent_name": None if is_rollup else parent_effect,
                 "position": position,
+                "review_status": DEFAULT_REVIEW_STATUS,
             }
         )
 
@@ -271,8 +243,10 @@ def build_release(previous_ids: dict[str, str] | None = None) -> dict[str, Any]:
             {
                 "label": label,
                 "normalized_label": normalize_label(label),
-                "effect_id": concept_ids[target],
-                "effect_name": target,
+                "effect_id": concept_ids[target] if safe else None,
+                "effect_name": target if safe else None,
+                "candidate_effect_id": None if safe else concept_ids[target],
+                "candidate_effect_name": None if safe else target,
                 "resolution": "automatic" if safe else "manual_review",
                 "detail": extractor.DEPRECATED_EFFECT_DETAILS.get(label),
             }
@@ -290,8 +264,8 @@ def build_release(previous_ids: dict[str, str] | None = None) -> dict[str, Any]:
     body = {
         "schema_version": SCHEMA_VERSION,
         "ontology": ONTOLOGY_NAME,
-        "ontology_hash": extractor.ONTOLOGY_HASH,
         "id_namespace": str(ONTOLOGY_NAMESPACE),
+        "normalization": NORMALIZATION_PROFILE,
         "concepts": concepts,
         "aliases": aliases,
         "redirects": redirects,
@@ -305,7 +279,79 @@ def build_release(previous_ids: dict[str, str] | None = None) -> dict[str, Any]:
             "ambiguous_labels": len(ambiguous_labels),
         },
     }
-    return {**body, "release_hash": stable_hash(body)}
+    body["normalization_hash"] = compute_normalization_hash(body)
+    body["semantic_hash"] = compute_semantic_hash(body)
+    return {**body, "release_hash": compute_release_hash(body)}
+
+
+def validate_current_alignment(release: dict[str, Any]) -> None:
+    """Require a valid schema-v3 artifact to match the checked-out sources."""
+
+    concepts = release["concepts"]
+    expected_concepts = {
+        effect: (domain, parent_effect)
+        for domain, effects in extractor.CONTROLLED_EFFECT_ONTOLOGY.items()
+        for effect, parent_effect in effects.items()
+    }
+    actual_concepts = {
+        concept["name"]: (concept["domain"], concept["parent_name"] or concept["name"])
+        for concept in concepts
+    }
+    if actual_concepts != expected_concepts:
+        raise ValueError("Ontology release concepts do not match the current hierarchy")
+    actual_definitions = {
+        concept["name"]: concept["definition"] for concept in concepts
+    }
+    if actual_definitions != extractor.EFFECT_DEFINITIONS:
+        raise ValueError("Ontology release definitions do not match the current catalog")
+    if any(concept["review_status"] != DEFAULT_REVIEW_STATUS for concept in concepts):
+        raise ValueError("Ontology release review status does not match the current catalog")
+
+    expected_aliases = {
+        alias: (target, extractor.EFFECT_COMPATIBILITY_DETAILS.get(alias))
+        for alias, target in extractor.EFFECT_ALIASES.items()
+        if alias != target and alias not in extractor.DEPRECATED_EFFECT_REDIRECTS
+    }
+    actual_aliases = {
+        record["label"]: (record["effect_name"], record["detail"])
+        for record in release["aliases"]
+    }
+    if actual_aliases != expected_aliases:
+        raise ValueError("Ontology release aliases do not match the current runtime")
+
+    expected_redirects = {
+        label: (
+            target,
+            "automatic"
+            if label in extractor.SAFE_DEPRECATED_EFFECT_REDIRECTS
+            else "manual_review",
+            extractor.DEPRECATED_EFFECT_DETAILS.get(label),
+        )
+        for label, target in extractor.DEPRECATED_EFFECT_REDIRECTS.items()
+    }
+    actual_redirects = {
+        record["label"]: (
+            record["effect_name"]
+            if record["resolution"] == "automatic"
+            else record["candidate_effect_name"],
+            record["resolution"],
+            record["detail"],
+        )
+        for record in release["redirects"]
+    }
+    if actual_redirects != expected_redirects:
+        raise ValueError("Ontology release redirects do not match current safety policy")
+    expected_ambiguous = sorted(
+        {
+            normalize_label(label)
+            for label in (
+                set(extractor.AMBIGUOUS_EFFECT_ALIASES)
+                | set(extractor.UNSAFE_EFFECT_ALIAS_LABELS)
+            )
+        }
+    )
+    if release["ambiguous_labels"] != expected_ambiguous:
+        raise ValueError("Ontology release ambiguity policy does not match the runtime")
 
 
 def validate_release(
@@ -315,16 +361,22 @@ def validate_release(
 ) -> None:
     """Validate the release body independently and, by default, against source."""
 
-    if not isinstance(release, dict) or set(release) != RELEASE_KEYS:
+    schema_version = release.get("schema_version") if isinstance(release, dict) else None
+    if schema_version == SCHEMA_VERSION:
+        validate_consumer_release(release)
+        if require_current_alignment:
+            validate_current_alignment(release)
+        return
+
+    if not isinstance(release, dict) or set(release) != LEGACY_RELEASE_KEYS:
         raise ValueError("Ontology release has an unexpected top-level shape")
     release_hash = release.get("release_hash")
     if not isinstance(release_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", release_hash):
         raise ValueError("Ontology release hash must be 64 lowercase hex characters")
-    body = {key: release[key] for key in RELEASE_BODY_KEYS}
+    body = {key: release[key] for key in LEGACY_RELEASE_BODY_KEYS}
     if release_hash != stable_hash(body):
         raise ValueError("Ontology release hash does not match its canonical content")
-    schema_version = release.get("schema_version")
-    if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
+    if schema_version not in {1, 2}:
         raise ValueError(
             f"Unsupported ontology release schema: {release.get('schema_version')!r}"
         )
@@ -349,9 +401,7 @@ def validate_release(
     concepts_by_id: dict[str, dict[str, Any]] = {}
     normalized_names: set[str] = set()
     slugs: set[str] = set()
-    required_concept_keys = (
-        CONCEPT_KEYS if schema_version == SCHEMA_VERSION else LEGACY_CONCEPT_KEYS
-    )
+    required_concept_keys = V2_CONCEPT_KEYS if schema_version == 2 else LEGACY_CONCEPT_KEYS
     for position, concept in enumerate(concepts):
         if not isinstance(concept, dict) or set(concept) != required_concept_keys:
             raise ValueError(f"Concept at position {position} has an invalid shape")
@@ -376,7 +426,7 @@ def validate_release(
             raise ValueError(f"Concept {name!r} has a stale slug")
         if normalized_name in normalized_names or slug in slugs:
             raise ValueError("Ontology release concept names and slugs must be unique")
-        if schema_version == SCHEMA_VERSION:
+        if schema_version == 2:
             definition = concept.get("definition")
             if (
                 not isinstance(definition, str)
@@ -458,7 +508,9 @@ def validate_release(
         return records, normalized_labels
 
     aliases, alias_labels = validate_name_records("aliases", ALIAS_KEYS)
-    redirects, redirect_labels = validate_name_records("redirects", REDIRECT_KEYS)
+    redirects, redirect_labels = validate_name_records(
+        "redirects", LEGACY_REDIRECT_KEYS
+    )
     if alias_labels & redirect_labels:
         raise ValueError("Automatic aliases and deprecated redirects must be disjoint")
     concepts_by_normalized_name = {
@@ -517,71 +569,7 @@ def validate_release(
     if not isinstance(counts, dict) or set(counts) != COUNT_KEYS or counts != expected_counts:
         raise ValueError("Ontology release counts do not match its content")
 
-    if not require_current_alignment:
-        return
-    if ontology_hash != extractor.ONTOLOGY_HASH:
-        raise ValueError("Ontology release does not match the current ontology hash")
-    expected_concepts = {
-        effect: (domain, parent_effect)
-        for domain, effects in extractor.CONTROLLED_EFFECT_ONTOLOGY.items()
-        for effect, parent_effect in effects.items()
-    }
-    actual_concepts = {
-        concept["name"]: (concept["domain"], concept["parent_name"] or concept["name"])
-        for concept in concepts
-    }
-    if actual_concepts != expected_concepts:
-        raise ValueError("Ontology release concepts do not match the current hierarchy")
-    actual_definitions = {
-        concept["name"]: concept["definition"] for concept in concepts
-    }
-    if actual_definitions != extractor.EFFECT_DEFINITIONS:
-        raise ValueError("Ontology release definitions do not match the current catalog")
-    expected_aliases = {
-        alias: (
-            target,
-            extractor.EFFECT_COMPATIBILITY_DETAILS.get(alias),
-        )
-        for alias, target in extractor.EFFECT_ALIASES.items()
-        if alias != target and alias not in extractor.DEPRECATED_EFFECT_REDIRECTS
-    }
-    actual_aliases = {
-        record["label"]: (record["effect_name"], record["detail"])
-        for record in aliases
-    }
-    if actual_aliases != expected_aliases:
-        raise ValueError("Ontology release aliases do not match the current runtime")
-    expected_redirects = {
-        label: (
-            target,
-            "automatic"
-            if label in extractor.SAFE_DEPRECATED_EFFECT_REDIRECTS
-            else "manual_review",
-            extractor.DEPRECATED_EFFECT_DETAILS.get(label),
-        )
-        for label, target in extractor.DEPRECATED_EFFECT_REDIRECTS.items()
-    }
-    actual_redirects = {
-        record["label"]: (
-            record["effect_name"],
-            record["resolution"],
-            record["detail"],
-        )
-        for record in redirects
-    }
-    if actual_redirects != expected_redirects:
-        raise ValueError("Ontology release redirects do not match current safety policy")
-    expected_ambiguous = sorted(
-        {
-            normalize_label(label)
-            for label in (
-                set(extractor.AMBIGUOUS_EFFECT_ALIASES)
-                | set(extractor.UNSAFE_EFFECT_ALIAS_LABELS)
-            )
-        }
-    )
-    if ambiguous_labels != expected_ambiguous:
-        raise ValueError("Ontology release ambiguity policy does not match the runtime")
+    return
 
 
 def release_path(release_directory: Path, release_hash: str) -> Path:
@@ -626,6 +614,64 @@ def write_release(release: dict[str, Any], release_directory: Path) -> Path:
     return path
 
 
+def current_manifest_path(release_directory: Path) -> Path:
+    return release_directory / CURRENT_MANIFEST_FILENAME
+
+
+def write_current_manifest(release: dict[str, Any], artifact_path: Path) -> Path:
+    """Atomically update the stable pointer after its immutable artifact exists."""
+
+    artifact_bytes = artifact_path.read_bytes()
+    manifest = build_release_manifest(release, artifact_path.name, artifact_bytes)
+    serialized = json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    path = current_manifest_path(artifact_path.parent)
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    descriptor = os.open(
+        temporary,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+        0o644,
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(serialized)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+    return path
+
+
+def validate_current_manifest(release: dict[str, Any], artifact_path: Path) -> None:
+    manifest_path = current_manifest_path(artifact_path.parent)
+    try:
+        manifest_text = manifest_path.read_text(encoding="utf-8")
+        manifest = json.loads(manifest_text)
+        artifact_bytes = artifact_path.read_bytes()
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Cannot read current ontology manifest: {exc}") from exc
+    validate_release_manifest(manifest, release, artifact_bytes)
+    expected = (
+        json.dumps(
+            build_release_manifest(release, artifact_path.name, artifact_bytes),
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    if manifest_text != expected:
+        raise ValueError("Current ontology manifest is not deterministically serialized")
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -647,7 +693,10 @@ def main(argv: list[str] | None = None) -> int:
     path = release_path(args.release_directory, release["release_hash"])
 
     if args.write:
-        print(write_release(release, args.release_directory))
+        path = write_release(release, args.release_directory)
+        manifest_path = write_current_manifest(release, path)
+        print(path)
+        print(manifest_path)
         return 0
     if args.check:
         expected = json.dumps(release, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
@@ -657,7 +706,13 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
+        try:
+            validate_current_manifest(release, path)
+        except ValueError as exc:
+            print(f"Current ontology manifest is missing or stale: {exc}", file=sys.stderr)
+            return 1
         print(path)
+        print(current_manifest_path(args.release_directory))
         return 0
 
     print(json.dumps(release, ensure_ascii=False, indent=2, sort_keys=True))

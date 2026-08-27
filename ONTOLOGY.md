@@ -114,19 +114,40 @@ evidence can be decomposed correctly.
 ## Machine-readable releases
 
 `export_ontology.py` publishes the modular ontology as immutable,
-content-addressed JSON under `ontology_releases/`. `ontology_hash` fingerprints
-the extractor's normalization semantics; `release_hash` fingerprints the
-exported schema body. Concept UUIDv5 IDs remain stable across releases by
-reading verified prior artifacts.
+content-addressed JSON under `ontology_releases/`. Concept UUIDv5 IDs remain
+stable across releases by reading and validating every prior artifact. The
+stable `ontology_releases/current.json` manifest pins one exact current release;
+consumers must not select an artifact by filename order.
 
-Schema v2 publishes the elaborate definition on every concept record;
-immutable schema v1 artifacts remain valid stable-ID history and are verified
-by the same reader.
+Immutable schema v1 and v2 artifacts remain valid stable-ID history and are
+verified by the same reader. Schema v3 adds:
+
+- `normalization_hash` over the declared normalization behavior, canonical
+  labels/slugs, aliases, redirects, resolution modes, and ambiguity blocklist;
+- `semantic_hash` over concepts, definitions, hierarchy, redirect relations,
+  and review metadata;
+- `release_hash` over the complete canonical release body except its own hash;
+  and
+- a raw serialized `artifact_sha256` in the current manifest.
+
+A definition-only edit therefore changes `semantic_hash` and `release_hash`
+while leaving `normalization_hash` unchanged. Multiple schema-v3 releases may
+share a normalization hash; their semantic hashes distinguish them.
+
+Every current concept has `review_status: "defined"`. This controlled status
+means exactly that the concept has one nonempty definition. It does not mean
+that an editor, subject-matter expert, clinician, or formal review board has
+reviewed it. The other reserved states are `draft`, `editorial_reviewed`,
+`expert_reviewed`, and `deprecated`; use them only when the corresponding
+process actually occurred.
 
 The exported `normalized_name` and `normalized_label` values are Unicode search
 keys, not permission to resolve an ambiguous phrase. Automatic aliases and
 safe redirects remain distinct from `manual_review` redirects and the explicit
-ambiguous-label list.
+ambiguous-label list. Automatic redirects carry `effect_id` as resolvable
+identity. Manual-review redirects instead carry a `candidate_effect_id` for
+editorial context; the standard consumer resolver always leaves `concept_id`
+unset for them. Ambiguous labels likewise remain unresolved.
 
 For a canonical rename:
 
@@ -139,9 +160,9 @@ For a canonical rename:
 
 Unsafe redirects never transfer stable identity. If label normalization or the
 release structure changes, increment the export schema version; do not create
-two releases with different bodies for the same schema and `ontology_hash`.
-Any schema-version change must also teach the prior-release reader how to carry
-concept IDs forward from the older schema.
+an incompatible body under an old schema. Any schema-version change must also
+teach the prior-release reader how to validate older artifacts and carry their
+concept IDs forward.
 
 ## Review checklist
 

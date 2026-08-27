@@ -12,6 +12,12 @@ import effect_extractor as extractor
 import export_ontology as ontology_export
 
 
+def rehash_current_release(release):
+    release["normalization_hash"] = ontology_export.compute_normalization_hash(release)
+    release["semantic_hash"] = ontology_export.compute_semantic_hash(release)
+    release["release_hash"] = ontology_export.compute_release_hash(release)
+
+
 class OntologyExportTests(unittest.TestCase):
     def test_release_is_complete_and_self_validating(self):
         release = ontology_export.build_release()
@@ -24,8 +30,14 @@ class OntologyExportTests(unittest.TestCase):
         self.assertEqual(expected_concepts, release["counts"]["concepts"])
         self.assertEqual(485, release["counts"]["atomic_concepts"])
         self.assertEqual(21, release["counts"]["rollup_concepts"])
-        self.assertEqual(extractor.ONTOLOGY_HASH, release["ontology_hash"])
+        self.assertEqual(3, release["schema_version"])
+        self.assertRegex(release["normalization_hash"], r"^[0-9a-f]{64}$")
+        self.assertRegex(release["semantic_hash"], r"^[0-9a-f]{64}$")
         self.assertRegex(release["release_hash"], r"^[0-9a-f]{64}$")
+        self.assertEqual(
+            {"defined"},
+            {concept["review_status"] for concept in release["concepts"]},
+        )
 
         concept_ids = {concept["id"] for concept in release["concepts"]}
         self.assertEqual(expected_concepts, len(concept_ids))
@@ -130,17 +142,23 @@ class OntologyExportTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "filename does not match"):
                 ontology_export.read_previous_concept_ids(release_directory)
 
-    def test_competing_release_for_one_ontology_hash_is_rejected(self):
+    def test_competing_legacy_release_for_one_ontology_hash_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             release_directory = Path(directory)
-            release = ontology_export.build_release()
-            ontology_export.write_release(release, release_directory)
+            source_path = Path(__file__).resolve().parent / "ontology_releases" / (
+                "subjective-effects-"
+                "8adcb2f4ea4ac6bf4ae50dcc114c03a4f897a33fa99638b120ca048c8d78c013.json"
+            )
+            release = json.loads(source_path.read_text(encoding="utf-8"))
+            (release_directory / source_path.name).write_text(
+                source_path.read_text(encoding="utf-8"), encoding="utf-8"
+            )
 
             competing = copy.deepcopy(release)
             competing["aliases"][0]["detail"] = "competing release"
             body = {
                 key: competing[key]
-                for key in ontology_export.RELEASE_BODY_KEYS
+                for key in ontology_export.LEGACY_RELEASE_BODY_KEYS
             }
             competing["release_hash"] = ontology_export.stable_hash(body)
             competing_path = ontology_export.release_path(
@@ -197,11 +215,7 @@ class OntologyExportTests(unittest.TestCase):
         atomic["parent_name"] = None
         extra_rollup["counts"]["atomic_concepts"] -= 1
         extra_rollup["counts"]["rollup_concepts"] += 1
-        body = {
-            key: extra_rollup[key]
-            for key in ontology_export.RELEASE_BODY_KEYS
-        }
-        extra_rollup["release_hash"] = ontology_export.stable_hash(body)
+        rehash_current_release(extra_rollup)
         with self.assertRaisesRegex(ValueError, "exactly one rollup"):
             ontology_export.validate_release(
                 extra_rollup,
@@ -223,11 +237,7 @@ class OntologyExportTests(unittest.TestCase):
         alias["label"] = other_concept["name"]
         alias["normalized_label"] = other_concept["normalized_name"]
         canonical_collision["aliases"].sort(key=lambda record: record["label"])
-        body = {
-            key: canonical_collision[key]
-            for key in ontology_export.RELEASE_BODY_KEYS
-        }
-        canonical_collision["release_hash"] = ontology_export.stable_hash(body)
+        rehash_current_release(canonical_collision)
         with self.assertRaisesRegex(ValueError, "different canonical concept"):
             ontology_export.validate_release(
                 canonical_collision,
@@ -244,12 +254,8 @@ class OntologyExportTests(unittest.TestCase):
         ambiguous_collision["ambiguous_labels"].append(canonical_label)
         ambiguous_collision["ambiguous_labels"].sort()
         ambiguous_collision["counts"]["ambiguous_labels"] += 1
-        body = {
-            key: ambiguous_collision[key]
-            for key in ontology_export.RELEASE_BODY_KEYS
-        }
-        ambiguous_collision["release_hash"] = ontology_export.stable_hash(body)
-        with self.assertRaisesRegex(ValueError, "collide with canonical"):
+        rehash_current_release(ambiguous_collision)
+        with self.assertRaisesRegex(ValueError, "resolve automatically"):
             ontology_export.validate_release(
                 ambiguous_collision,
                 require_current_alignment=False,
@@ -281,11 +287,7 @@ class OntologyExportTests(unittest.TestCase):
             with self.subTest(name=name):
                 changed = copy.deepcopy(release)
                 mutate(changed)
-                body = {
-                    key: changed[key]
-                    for key in ontology_export.RELEASE_BODY_KEYS
-                }
-                changed["release_hash"] = ontology_export.stable_hash(body)
+                rehash_current_release(changed)
                 with self.assertRaises(ValueError):
                     ontology_export.validate_release(changed)
 
