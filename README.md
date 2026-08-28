@@ -1,4 +1,9 @@
-# Erowid Effect Extractor
+# SubFXOnEX
+## so. WHY?
+
+> drug.community’s ontology is not a curator-authored vocabulary imposed on experience; it is an attempt to derive the vocabulary from experience itself. Unlike SEI/dose.wiki’s largely top-down, hand-curated taxonomy, our ontology is built from unstructured trip-report corpora, large-scale human tagging and crowdsourced semantic judgments, with computational methods used to surface recurring structure rather than dictate it. Concepts are treated as hypotheses about how people actually describe altered states: they must be supported by observations, distinguishable from neighboring concepts, traceable to evidence, and revisable as the corpus grows.** No individual curator—not Josie Kins, not us, not a model—is the final epistemic authority. The goal is a versioned, provenance-rich, empirically grounded vocabulary whose categories emerge from collective phenomenological evidence rather than from the intuitions of any single author.**
+
+## The technical stuff.
 
 This project runs a Dockerized Z.ai GLM extractor that converts Erowid report
 text into grounded, controlled subjective-effect tags stored in MongoDB.
